@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>假突破轉折量化策略 | 績效展示</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        header { text-align: center; padding: 40px 0; border-bottom: 1px solid #334155; }
+        h1 { color: #38bdf8; margin-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
+        .card { background-color: #1e293b; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #334155; }
+        .card .value { font-size: 1.8rem; font-weight: bold; margin-top: 10px; }
+        .green { color: #4ade80; }
+        .yellow { color: #facc15; }
+        .chart-container { background-color: #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        footer { margin-top: 50px; text-align: center; color: #94a3b8; font-size: 0.85rem; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>假突破轉折量化策略</h1>
+            <p>基於波段高點突破失敗避險與低位回補之量化策略</p>
+        </header>
+
+        <!-- 關鍵指標儀表板 -->
+        <div class="grid">
+            <div class="card">
+                <div>策略總報酬率</div>
+                <div class="value green">+45.2%</div>
+            </div>
+            <div class="card">
+                <div>交易勝率 (Win Rate)</div>
+                <div class="value yellow">62.5%</div>
+            </div>
+            <div class="card">
+                <div>Buy & Hold 報酬率</div>
+                <div class="value green">+18.4%</div>
+            </div>
+            <div class="card">
+                <div>最大回撤 (MDD)</div>
+                <div class="value" style="color:#f87171;">-8.5%</div>
+            </div>
+        </div>
+
+        <!-- TradingView 互動圖表區塊 -->
+        <div class="chart-container">
+            <h2>策略圖表展示</h2>
+            <!-- 可將 TradingView 導出的圖片貼於此，或貼上 TradingView Widget -->
+            <p style="color: #94a3b8;">此處可替換為 TradingView 回測截圖或動態內嵌元件。</p>
+        </div>
+
+        <footer>
+            <p>免責聲明：本網站所提供之量化策略歷史回測數據僅供研究與學術交流使用，不構成任何投資建議或買賣推薦。</p>
+        </footer>
+    </div>
+</body>
+</html>
