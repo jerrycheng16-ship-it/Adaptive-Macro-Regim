@@ -97,7 +97,7 @@ def run_macro_model(raw_signals, returns, z_window, ic_window):
     alloc_tlt = regimes.map(lambda r: REGIME_CONFIG[r]['tltW']).shift(1)
     alloc_cash = regimes.map(lambda r: REGIME_CONFIG[r]['cashW']).shift(1)
     
-    # 【關鍵修復】：統一將回測起始點固定為 1993-01-01，消除起點偏移造成的 Benchmark 計算誤差
+    # 統一將回測起始點固定為 1993-01-01
     fixed_start_date = pd.to_datetime('1993-01-01')
     valid_idx = alloc_eq.dropna().loc[fixed_start_date:].index
     
@@ -155,8 +155,8 @@ with col_btn1:
             
             ---
             **⚙️ 靈活性參數設計:**
-            1. **Z-Score 滾動視窗 (12M - 60M):** 控制計算標準分數時的歷史參考記憶長度。
-            2. **IC 權重視窗 (3M - 24M):** 控制模型對近期因子失效/生效的適應靈敏度。
+            1. **Z-Score 滾動視窗 (12M - 60M):** 控制計算標準分數時的歷史參考記憶長度。預設 36 個月。
+            2. **IC 權重視窗 (3M - 24M):** 控制模型對近期因子失效/生效的適應靈敏度。預設 8 個月。
             """)
         show_paper_info()
 
@@ -180,7 +180,7 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 參數控制與特定月份動態查詢 (Dynamic Parameter & Month Selector)
+# 5. 參數控制與特定月份動態查詢 (IC 預設改為 8M)
 # -----------------------------------------------------------------------------
 st.markdown("### 🎛️ 策略模型參數調校 (Model Parameter Control)")
 
@@ -195,8 +195,8 @@ with col_z:
 with col_ic:
     ic_win_sel = st.slider(
         "適應性 IC 權重視窗 (IC Weighting Lookback Window - Months):",
-        min_value=3, max_value=24, value=12, step=1,
-        help="決定統計因子與未來股市相關性的視窗。視窗越短，權重調整越靈敏。預設 12 個月。"
+        min_value=3, max_value=24, value=8, step=1, # 已調整預設值為 8
+        help="決定統計因子與未來股市相關性的視窗。視窗越短，權重調整越靈敏。預設 8 個月。"
     )
 
 df_bt, df_details = run_macro_model(raw_signals, returns, z_win_sel, ic_win_sel)
