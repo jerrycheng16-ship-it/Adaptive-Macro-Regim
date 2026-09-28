@@ -13,7 +13,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# 套用 CSS 樣式以貼近 HTML 的深色質感
 st.markdown("""
 <style>
     .stApp { background-color: #0F172A; color: #F8FAFC; }
@@ -23,17 +22,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 REGIME_CONFIG = {
-    'Expansion': {'minScore': 0.20, 'name': '擴張期 (Expansion)', 'color': '#10B981', 'eqW': 1.00, 'cashW': 0.00},
-    'Recovery':  {'minScore': 0.00, 'name': '復甦期 (Recovery)',  'color': '#3B82F6', 'eqW': 0.70, 'cashW': 0.30},
-    'Slowdown':  {'minScore': -0.20,'name': '放緩期 (Slowdown)',  'color': '#F59E0B', 'eqW': 0.40, 'cashW': 0.60},
-    'Contraction':{'minScore':-1.00,'name': '收縮期 (Contraction)', 'color': '#EF4444', 'eqW': 0.10, 'cashW': 0.90}
+    'Expansion':  {'minScore': 0.40, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
+    'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
+    'Slowdown':   {'minScore':-0.40, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
+    'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
 }
 
 # -----------------------------------------------------------------------------
-# 2. 自動抓取真實行情與回測計算 (已修正 pandas 2.1+ .map 相容性問題)
+# 2. 論文優化版：Z-Score 標準化 + 滾動 IC + 多資產避險引擎
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
-def load_real_data_and_backtest():
+def load_optimized_backtest():
     tickers = {
         'Equity': 'VFINX',      # S&P 500 (SPY 代理)
         'MidTreasury': 'VFITX',  # 中天期國債 (IEF 代理)
@@ -42,60 +41,70 @@ def load_real_data_and_backtest():
         'Cash': 'VFISX'         # 短期國債 (BIL 代理)
     }
     
-    # 使用 auto_adjust=True 確保直接取得調整後收盤價
-    raw_df = yf.download(list(tickers.values()), start="1990-01-01", auto_adjust=True)
+    raw_df = yf.download(list(tickers.values()), start="1988-01-01", auto_adjust=True)
     
-    # 處理 yfinance 回傳的多重索引或單一欄位結構
     if isinstance(raw_df.columns, pd.MultiIndex):
-        if 'Close' in raw_df.columns.levels[0]:
-            df = raw_df['Close']
-        else:
-            df = raw_df.iloc[:, :len(tickers)]
+        df = raw_df['Close'] if 'Close' in raw_df.columns.levels[0] else raw_df.iloc[:, :len(tickers)]
     else:
         df = raw_df
 
-    # 重新命名欄位
     df = df.rename(columns={v: k for k, v in tickers.items()}).dropna()
-    
     monthly_data = df.resample('ME').last()
     returns = monthly_data.pct_change().dropna()
     
-    # 代理因子計算 (6M Momentum)
-    sig_growth = monthly_data['Equity'].pct_change(6)
-    sig_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6)
-    sig_rates = monthly_data['LongTreasury'].pct_change(6)
+    # 1. 原始代理因子 (6M Momentum)
+    raw_growth = monthly_data['Equity'].pct_change(6)
+    raw_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6)
+    raw_rates = monthly_data['LongTreasury'].pct_change(6)
     
-    signals = pd.DataFrame({'Growth': sig_growth, 'Credit': sig_credit, 'Rates': sig_rates}).dropna()
+    raw_signals = pd.DataFrame({'Growth': raw_growth, 'Credit': raw_credit, 'Rates': raw_rates}).dropna()
     
-    # 12 個月滾動 IC 計算動態權重
-    fwd_ret = returns['Equity'].shift(-1)
-    rolling_ic = pd.DataFrame(index=signals.index)
-    for col in signals.columns:
-        rolling_ic[col] = signals[col].rolling(12).corr(fwd_ret)
+    # 2. 關鍵優化：對因子進行 36 個月滾動 Z-Score 標準化 (Normalize to Z-scores)
+    z_signals = pd.DataFrame(index=raw_signals.index)
+    for col in raw_signals.columns:
+        mean = raw_signals[col].rolling(36).mean()
+        std = raw_signals[col].rolling(36).std()
+        z_signals[col] = (raw_signals[col] - mean) / std.replace(0, 1)
         
-    # 相容 pandas 新版 (用 .map 替代已廢棄的 .applymap)
+    z_signals = z_signals.dropna()
+    
+    # 3. 計算 12 個月滾動 IC 適應性權重
+    fwd_ret = returns['Equity'].reindex(z_signals.index).shift(-1)
+    rolling_ic = pd.DataFrame(index=z_signals.index)
+    for col in z_signals.columns:
+        rolling_ic[col] = z_signals[col].rolling(12).corr(fwd_ret)
+        
     weights = rolling_ic.map(lambda x: max(x, 0) if pd.notnull(x) else 0)
     weight_sum = weights.sum(axis=1).replace(0, 1)
     weights = weights.div(weight_sum, axis=0)
     
-    macro_score = (signals * weights).sum(axis=1).dropna()
+    # 加權合成 Adaptive Macro Score
+    macro_score = (z_signals * weights).sum(axis=1).dropna()
     
+    # 4. 體制劃分與部位對應
     def get_regime_info(s):
-        if s > 0.20: return 'Expansion', 1.00
-        elif s > 0.00: return 'Recovery', 0.70
-        elif s > -0.20: return 'Slowdown', 0.40
-        else: return 'Contraction', 0.10
+        if s > REGIME_CONFIG['Expansion']['minScore']: return 'Expansion'
+        elif s > REGIME_CONFIG['Recovery']['minScore']: return 'Recovery'
+        elif s > REGIME_CONFIG['Slowdown']['minScore']: return 'Slowdown'
+        else: return 'Contraction'
         
-    regimes = macro_score.map(lambda s: get_regime_info(s)[0])
-    eq_weights = macro_score.map(lambda s: get_regime_info(s)[1]).shift(1)
+    regimes = macro_score.map(get_regime_info)
     
-    valid_idx = eq_weights.dropna().index
+    # 位移一期 (Shift 1) 避免未來資訊偏誤
+    alloc_eq = regimes.map(lambda r: REGIME_CONFIG[r]['eqW']).shift(1)
+    alloc_tlt = regimes.map(lambda r: REGIME_CONFIG[r]['tltW']).shift(1)
+    alloc_cash = regimes.map(lambda r: REGIME_CONFIG[r]['cashW']).shift(1)
+    
+    valid_idx = alloc_eq.dropna().index
     ret_eq = returns['Equity'].loc[valid_idx]
+    ret_tlt = returns['LongTreasury'].loc[valid_idx]
     ret_cash = returns['Cash'].loc[valid_idx]
-    w = eq_weights.loc[valid_idx]
     
-    strat_ret = w * ret_eq + (1 - w) * ret_cash
-    
+    # 計算策略複合月報酬率
+    strat_ret = (alloc_eq.loc[valid_idx] * ret_eq) + \
+                (alloc_tlt.loc[valid_idx] * ret_tlt) + \
+                (alloc_cash.loc[valid_idx] * ret_cash)
+                
     backtest_df = pd.DataFrame({
         'Regime': regimes.loc[valid_idx],
         'SPY_Ret': ret_eq,
@@ -107,18 +116,18 @@ def load_real_data_and_backtest():
     
     latest_date = macro_score.index[-1].strftime('%Y-%m')
     latest_score = macro_score.iloc[-1]
-    latest_growth = signals['Growth'].iloc[-1]
-    latest_credit = signals['Credit'].iloc[-1]
-    latest_rates = signals['Rates'].iloc[-1]
+    latest_growth = z_signals['Growth'].iloc[-1]
+    latest_credit = z_signals['Credit'].iloc[-1]
+    latest_rates = z_signals['Rates'].iloc[-1]
     
     return backtest_df, latest_date, latest_score, latest_growth, latest_credit, latest_rates
 
 # 執行載入
 try:
-    with st.spinner("正在連線下載真實市場數據..."):
-        df_bt, latest_date, latest_score, latest_g, latest_c, latest_r = load_real_data_and_backtest()
+    with st.spinner("正在執行優化版真實歷史數據回測..."):
+        df_bt, latest_date, latest_score, latest_g, latest_c, latest_r = load_optimized_backtest()
 except Exception as e:
-    st.error(f"數據下載失敗，請重新整理頁面。錯誤細節: {e}")
+    st.error(f"數據下載或回測失敗，細節: {e}")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -128,7 +137,7 @@ col_header, col_btn1, col_btn2 = st.columns([2.5, 1, 1])
 
 with col_header:
     st.title("Adaptive Macro Regimes")
-    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)")
+    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates) | Z-Score 優化版")
 
 with col_btn1:
     if st.button("📄 論文出處與數據說明"):
@@ -140,15 +149,9 @@ with col_btn1:
             * Published in *The Journal of Portfolio Management*
             
             ---
-            **💡 為什麼採用「金融市場價格」取代「經濟數據」？**
-            * **發布延遲 (Publication Lag)：** 官方數據 (GDP, CPI) 通常延遲 1~2 個月。
-            * **經常性修正 (Data Revisions)：** 初值常大幅修改。
-            
-            ---
-            **⚙️ 三個代理數據計算邏輯:**
-            1. **經濟成長 (Growth):** S&P 500 (VFINX/SPY) 6M 報酬率。
-            2. **信用利差 (Credit Spread):** 高收益債 (VWEHX/HYG) / 中天期國債 (VFITX/IEF) 6M 相對強度。
-            3. **利率趨勢 (Rates):** 20年期美債 (VUSTX/TLT) 6M 報酬率。
+            **⚙️ 本版優化核心機制:**
+            1. **36M 滾動 Z-Score 標準化：** 將代理因子進行標準化，避免指標尺度差異造成體制判定偏誤。
+            2. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息週期的資本利得。
             """)
         show_paper_info()
 
@@ -157,16 +160,11 @@ with col_btn2:
         @st.dialog("Adaptive Strategy 策略標的與買賣/調倉機制說明")
         def show_strat_info():
             st.markdown("""
-            **🎯 交易標的:**
-            * **Risk-On (股票):** S&P 500 ETF (SPY)
-            * **Risk-Off (現金/短債):** 1-3M 短債/現金 (BIL)
-            
-            ---
-            **📊 買賣與部位劃分矩陣:**
-            * **Expansion (> +0.20):** 100% SPY / 0% Cash
-            * **Recovery (0.00 ~ +0.20):** 70% SPY / 30% Cash
-            * **Slowdown (-0.20 ~ 0.00):** 40% SPY / 60% Cash
-            * **Contraction (< -0.20):** 10% SPY / 90% Cash
+            **📊 優化版資產配置矩陣:**
+            * **Expansion (> +0.40):** 100% SPY
+            * **Recovery (0.00 ~ +0.40):** 80% SPY / 20% Cash
+            * **Slowdown (-0.40 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash
+            * **Contraction (< -0.40):** 10% SPY / 60% TLT / 30% Cash
             """)
         show_strat_info()
 
@@ -178,16 +176,16 @@ st.divider()
 col_p1, col_p2, col_p3 = st.columns([1.2, 1.2, 1])
 
 with col_p1:
-    st.markdown(f"### 當月宏觀代理數據 (`{latest_date}`)")
-    st.metric("經濟成長代理 (SPY 6M)", f"{latest_g*100:+.2f}%")
-    st.metric("信用利差代理 (HYG/IEF 6M)", f"{latest_c*100:+.2f}%")
-    st.metric("利率趨勢代理 (TLT 6M)", f"{latest_r*100:+.2f}%")
+    st.markdown(f"### 當月標準化代理數據 (`{latest_date}`)")
+    st.metric("成長代理 Z-Score", f"{latest_g:+.2f}")
+    st.metric("信用代理 Z-Score", f"{latest_c:+.2f}")
+    st.metric("利率代理 Z-Score", f"{latest_r:+.2f}")
 
 with col_p2:
     st.markdown("### 當前體制判斷 (Real-time)")
-    if latest_score > 0.20: current_rKey = 'Expansion'
-    elif latest_score > 0.00: current_rKey = 'Recovery'
-    elif latest_score > -0.20: current_rKey = 'Slowdown'
+    if latest_score > REGIME_CONFIG['Expansion']['minScore']: current_rKey = 'Expansion'
+    elif latest_score > REGIME_CONFIG['Recovery']['minScore']: current_rKey = 'Recovery'
+    elif latest_score > REGIME_CONFIG['Slowdown']['minScore']: current_rKey = 'Slowdown'
     else: current_rKey = 'Contraction'
     
     cfg = REGIME_CONFIG[current_rKey]
@@ -199,10 +197,10 @@ with col_p2:
 with col_p3:
     st.markdown("### 資產配置比重")
     fig_donut = go.Figure(data=[go.Pie(
-        labels=['股票 (SPY)', '現金 (BIL)'],
-        values=[cfg['eqW']*100, cfg['cashW']*100],
+        labels=['股票 (SPY)', '長債 (TLT)', '現金 (BIL)'],
+        values=[cfg['eqW']*100, cfg['tltW']*100, cfg['cashW']*100],
         hole=.6,
-        marker_colors=[cfg['color'], '#334155']
+        marker_colors=[cfg['color'], '#6366F1', '#334155']
     )])
     fig_donut.update_layout(
         showlegend=True,
@@ -218,7 +216,7 @@ st.divider()
 # -----------------------------------------------------------------------------
 # 5. 回測表格與圖表
 # -----------------------------------------------------------------------------
-st.markdown("## 歷史體制回測與資產月報酬率 (1991 - 2026 真實歷史數據)")
+st.markdown("## 歷史體制回測與資產月報酬率 (優化版真實歷史數據)")
 
 stats_list = []
 total_m = len(df_bt)
