@@ -180,7 +180,7 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 參數控制與特定月份動態查詢 (IC 預設改為 8M)
+# 5. 參數控制與特定月份動態查詢 (固定資產色彩配色)
 # -----------------------------------------------------------------------------
 st.markdown("### 🎛️ 策略模型參數調校 (Model Parameter Control)")
 
@@ -195,7 +195,7 @@ with col_z:
 with col_ic:
     ic_win_sel = st.slider(
         "適應性 IC 權重視窗 (IC Weighting Lookback Window - Months):",
-        min_value=3, max_value=24, value=8, step=1, # 已調整預設值為 8
+        min_value=3, max_value=24, value=8, step=1,
         help="決定統計因子與未來股市相關性的視窗。視窗越短，權重調整越靈敏。預設 8 個月。"
     )
 
@@ -239,11 +239,13 @@ with col_p2:
 
 with col_p3:
     st.markdown("### 下月資產配置預測比重")
+    # 固定資產類別色彩配色：股票(橘黃)、長債(紫藍)、現金(深灰)
     fig_donut = go.Figure(data=[go.Pie(
         labels=['股票 (SPY)', '長債 (TLT)', '現金 (BIL)'],
         values=[m_cfg['eqW']*100, m_cfg['tltW']*100, m_cfg['cashW']*100],
         hole=.6,
-        marker_colors=[m_cfg['color'], '#6366F1', '#334155']
+        marker_colors=['#F59E0B', '#6366F1', '#475569'],
+        sort=False # 保持固定順序，不依數值大小重排
     )])
     fig_donut.update_layout(
         showlegend=True,
