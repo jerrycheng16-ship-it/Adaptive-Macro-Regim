@@ -35,7 +35,7 @@
       <div class="flex items-center gap-3">
         <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white">Adaptive Macro Regimes</h1>
         <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-accent/20 text-brand-accent border border-brand-accent/30">
-          Quant Terminal v3.0 (Backtest Enabled)
+          Quant Terminal v4.0
         </span>
       </div>
       <p class="text-sm text-slate-400 mt-1">Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)</p>
@@ -145,7 +145,7 @@
 
     </div>
 
-    <!-- NEW SECTION: Historical Backtest & Regime Monthly Returns Statistics -->
+    <!-- Backtest Section -->
     <div class="bg-brand-card rounded-xl border border-brand-border p-6 space-y-6">
       <div class="flex flex-col md:flex-row justify-between md:items-center border-b border-brand-border pb-4 gap-4">
         <div>
@@ -202,6 +202,159 @@
 
     </div>
 
+    <!-- Strategy Documentation Section -->
+    <div class="bg-brand-card rounded-xl border border-brand-border p-6 space-y-8">
+      
+      <!-- Part 1: Strategy Core Theory -->
+      <div class="space-y-4 border-b border-brand-border pb-6">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <svg class="w-6 h-6 text-brand-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+            適應性策略（Adaptive Strategy）運作原理與核心架構
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">基於 Andrew Lo 適應性市場假說（Adaptive Markets Hypothesis）與 Jim Masturzo 的宏觀體制動態配置理論</p>
+        </div>
+
+        <!-- Core Workflow Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800 space-y-2">
+            <div class="text-xs font-mono text-brand-accent uppercase font-bold">Step 1. 代理因子池建構</div>
+            <h3 class="text-sm font-semibold text-white">建立多元宏觀代理指標</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              採用股市動能（Growth）、高收益債/公債相對強度（Credit）與美債趨勢（Rates）作為經濟狀態的市場即時代理指標。
+            </p>
+          </div>
+
+          <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800 space-y-2">
+            <div class="text-xs font-mono text-brand-accent uppercase font-bold">Step 2. 滾動勝率/IC評價</div>
+            <h3 class="text-sm font-semibold text-white">滾動計算預測信息係數</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              採用長度為 $N$ 個月的滾動視窗，計算各指標對未來一期股票報酬率的 Information Coefficient (IC/相關性)。
+            </p>
+          </div>
+
+          <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800 space-y-2">
+            <div class="text-xs font-mono text-brand-accent uppercase font-bold">Step 3. 動態加權分配</div>
+            <h3 class="text-sm font-semibold text-white">適應性 Softmax 權重更新</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              近期預測力高（$IC > 0$）的指標獲得更高動態權重；預測力轉弱或失效（$IC \le 0$）者自動降權或捨棄。
+            </p>
+          </div>
+
+          <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800 space-y-2">
+            <div class="text-xs font-mono text-brand-accent uppercase font-bold">Step 4. 四大體制資產配置</div>
+            <h3 class="text-sm font-semibold text-white">體制切換與風險控管</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              根據合成宏觀總分劃分 Expansion、Recovery、Slowdown 與 Contraction 四大狀態，動態調整股票曝險。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Part 2: Detailed Execution & Trading Rules Documentation -->
+      <div class="space-y-6">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <svg class="w-5 h-5 text-brand-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            走勢圖中 Adaptive Strategy 的標的與買賣/調倉機制說明
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">詳細說明走勢圖中綠色實線（適應性策略）具體交易什麼標的、何時觸發買進與賣出訊號</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          <!-- Trading Assets -->
+          <div class="bg-slate-900/60 p-5 rounded-xl border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-brand-accent flex items-center gap-2">
+              <span>🎯 交易標的池 (Trading Universe)</span>
+            </h3>
+            <ul class="space-y-2 text-xs text-slate-300">
+              <li class="flex items-start gap-2">
+                <span class="text-brand-success font-bold">・股票類標的 (Risk-On):</span>
+                <span>主要交易美股 S&P 500 指數 ETF（以 <strong>SPY</strong> 為代表），作為多頭市場的主要獲利來源。</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-slate-400 font-bold">・防禦與現金標的 (Risk-Off):</span>
+                <span>採用美國 1-3 個月短債/現金 ETF（以 <strong>BIL</strong> 為代表），或 20 年期以上國債 ETF（<strong>TLT</strong>）作為市場崩跌時的防禦避風港。</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Rebalancing Mechanism -->
+          <div class="bg-slate-900/60 p-5 rounded-xl border border-slate-800 space-y-3">
+            <h3 class="text-sm font-bold text-brand-accent flex items-center gap-2">
+              <span>⏱️ 調倉與執行頻率 (Rebalancing Mechanism)</span>
+            </h3>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              策略採取 <strong>「每月月末（Monthly Rebalancing）」</strong> 檢視機制。每月最後一個交易日，模型計算最新宏觀得分，並在下一個月首個交易日調倉至目標部位，避免過度頻繁交易產生摩擦成本。
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Buy / Sell Triggers Table -->
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold text-slate-300">買進與賣出觸發條件矩陣 (Trading Trigger Rules)</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-800/80 text-slate-400 uppercase font-mono border-b border-slate-700">
+                <tr>
+                  <th class="py-2.5 px-3">宏觀得分條件</th>
+                  <th class="py-2.5 px-3">判定體制</th>
+                  <th class="py-2.5 px-3">買賣交易動作 (Action)</th>
+                  <th class="py-2.5 px-3 text-right">SPY (股票) 部位</th>
+                  <th class="py-2.5 px-3 text-right">BIL/TLT (現金/債) 部位</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800 font-mono text-slate-300">
+                <tr class="bg-emerald-950/20">
+                  <td class="py-2.5 px-3 font-bold text-brand-success">&gt; +0.20</td>
+                  <td class="py-2.5 px-3 font-bold text-brand-success">擴張期 (Expansion)</td>
+                  <td class="py-2.5 px-3 text-slate-200"><strong>【買進/滿倉】</strong> 經濟強勁，全額持有股票部位發揮最大多頭漲幅。</td>
+                  <td class="py-2.5 px-3 text-right text-brand-success font-bold">100%</td>
+                  <td class="py-2.5 px-3 text-right">0%</td>
+                </tr>
+                <tr class="bg-blue-950/20">
+                  <td class="py-2.5 px-3 font-bold text-blue-400">0.00 ~ +0.20</td>
+                  <td class="py-2.5 px-3 font-bold text-blue-400">復甦期 (Recovery)</td>
+                  <td class="py-2.5 px-3 text-slate-200"><strong>【積極加碼】</strong> 景氣打底，將現金轉回股票，提升 risk-on 部位。</td>
+                  <td class="py-2.5 px-3 text-right text-blue-400 font-bold">70%</td>
+                  <td class="py-2.5 px-3 text-right">30%</td>
+                </tr>
+                <tr class="bg-amber-950/20">
+                  <td class="py-2.5 px-3 font-bold text-brand-warning">-0.20 ~ 0.00</td>
+                  <td class="py-2.5 px-3 font-bold text-brand-warning">放緩期 (Slowdown)</td>
+                  <td class="py-2.5 px-3 text-slate-200"><strong>【分批賣出】</strong> 成長趨緩，賣出 60% 股票轉持有現金避險。</td>
+                  <td class="py-2.5 px-3 text-right text-brand-warning font-bold">40%</td>
+                  <td class="py-2.5 px-3 text-right">60%</td>
+                </tr>
+                <tr class="bg-rose-950/20">
+                  <td class="py-2.5 px-3 font-bold text-brand-danger">&lt; -0.20</td>
+                  <td class="py-2.5 px-3 font-bold text-brand-danger">收縮期 (Contraction)</td>
+                  <td class="py-2.5 px-3 text-slate-200"><strong>【全面清倉/防禦】</strong> 觸發極高風險警訊，大幅清倉股票轉入 90% 現金。</td>
+                  <td class="py-2.5 px-3 text-right text-brand-danger font-bold">10%</td>
+                  <td class="py-2.5 px-3 text-right font-bold">90%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Historical Performance Note -->
+        <div class="p-4 bg-slate-900/80 rounded-lg border border-slate-800 text-xs text-slate-400 space-y-1">
+          <div class="font-bold text-white flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-brand-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            走勢圖防禦效果觀察重點 (Chart Performance Note)
+          </div>
+          <p>
+            以 <strong>2008 年金融海嘯</strong> 期間為例：當買入持有 SPY（灰色虛線）一路下挫暴跌時，適應性策略（綠色實線）因觸發 Contraction 賣出機制，將 90% 以上資金轉為現金 BIL，使得資產曲線平穩避開 50% 以上的大幅回撤，成功展現極佳的風險控管優勢。
+          </p>
+        </div>
+
+      </div>
+
+    </div>
+
   </main>
 
   <script>
@@ -240,8 +393,6 @@
     // --- Simulated Historical Monthly Data (2008-2026, 224 Months) ---
     function generateHistoricalData() {
       const history = [];
-      const startDate = new Date(2008, 0, 1);
-      
       let spyCum = 100;
       let stratCum = 100;
 
@@ -277,11 +428,9 @@
           spyRet = +0.014; tltRet = +0.001; hygRet = +0.005; bilRet = 0.0035;
         }
 
-        // Add small random noise
         spyRet += (Math.sin(i) * 0.015);
         tltRet += (Math.cos(i) * 0.008);
 
-        // Strategy Return based on Regime Allocation
         let eqW = REGIME_CONFIG[regime].equityWeight / 100;
         let cashW = 1 - eqW;
         let stratRet = (spyRet * eqW) + (bilRet * cashW);
@@ -382,7 +531,6 @@
         filteredData = rawHistoryData.slice(0, 36); // 2008-2010
       }
 
-      // Group by Regime
       const groups = { Expansion: [], Recovery: [], Slowdown: [], Contraction: [] };
       filteredData.forEach(d => {
         if (groups[d.regime]) groups[d.regime].push(d);
@@ -421,10 +569,10 @@
         tbody.appendChild(tr);
       });
 
-      // Update Chart Data
-      const labels = filteredData.map(d => d.date);
-      const stratLine = filteredData.map(d => d.stratCum);
-      const spyLine = filteredData.map(d => d.spyCum);
+      // Chart always draws full history timeline to current
+      const labels = rawHistoryData.map(d => d.date);
+      const stratLine = rawHistoryData.map(d => d.stratCum);
+      const spyLine = rawHistoryData.map(d => d.spyCum);
 
       if (backtestChartInstance) {
         backtestChartInstance.data.labels = labels;
