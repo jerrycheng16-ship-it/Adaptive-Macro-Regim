@@ -29,10 +29,10 @@ REGIME_CONFIG = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 數據載入與優化版回測引擎
+# 2. 原始市場數據快取 (免去重複下載)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
-def load_optimized_backtest():
+def load_raw_market_data():
     tickers = {
         'Equity': 'VFINX',      # S&P 500 (SPY 代理)
         'MidTreasury': 'VFITX',  # 中天期國債 (IEF 代理)
@@ -41,7 +41,7 @@ def load_optimized_backtest():
         'Cash': 'VFISX'         # 短期國債 (BIL 代理)
     }
     
-    raw_df = yf.download(list(tickers.values()), start="1988-01-01", auto_adjust=True)
+    raw_df = yf.download(list(tickers.values()), start="1987-01-01", auto_adjust=True)
     
     if isinstance(raw_df.columns, pd.MultiIndex):
         df = raw_df['Close'] if 'Close' in raw_df.columns.levels[0] else raw_df.iloc[:, :len(tickers)]
@@ -52,27 +52,32 @@ def load_optimized_backtest():
     monthly_data = df.resample('ME').last()
     returns = monthly_data.pct_change().dropna()
     
-    # 1. 原始代理因子 (6M Momentum)
+    # 原始代理因子 (6M Momentum)
     raw_growth = monthly_data['Equity'].pct_change(6)
     raw_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6)
     raw_rates = monthly_data['LongTreasury'].pct_change(6)
     
     raw_signals = pd.DataFrame({'Growth': raw_growth, 'Credit': raw_credit, 'Rates': raw_rates}).dropna()
-    
-    # 2. 36 個月滾動 Z-Score 標準化
+    return raw_signals, returns
+
+# -----------------------------------------------------------------------------
+# 3. 可調參數核心運算引擎 (Dynamic Parameter Engine)
+# -----------------------------------------------------------------------------
+def run_macro_model(raw_signals, returns, z_window, ic_window):
+    # 1. 可調視窗 Z-Score 標準化
     z_signals = pd.DataFrame(index=raw_signals.index)
     for col in raw_signals.columns:
-        mean = raw_signals[col].rolling(36).mean()
-        std = raw_signals[col].rolling(36).std()
+        mean = raw_signals[col].rolling(z_window).mean()
+        std = raw_signals[col].rolling(z_window).std()
         z_signals[col] = (raw_signals[col] - mean) / std.replace(0, 1)
         
     z_signals = z_signals.dropna()
     
-    # 3. 計算 12 個月滾動 IC 適應性權重
+    # 2. 可調視窗滾動 IC 適應性權重
     fwd_ret = returns['Equity'].reindex(z_signals.index).shift(-1)
     rolling_ic = pd.DataFrame(index=z_signals.index)
     for col in z_signals.columns:
-        rolling_ic[col] = z_signals[col].rolling(12).corr(fwd_ret)
+        rolling_ic[col] = z_signals[col].rolling(ic_window).corr(fwd_ret)
         
     weights = rolling_ic.map(lambda x: max(x, 0) + 0.1 if pd.notnull(x) else 0.1)
     weight_sum = weights.sum(axis=1)
@@ -80,7 +85,7 @@ def load_optimized_backtest():
     
     macro_score = (z_signals * weights).sum(axis=1).dropna()
     
-    # 4. 體制劃分與部位對應
+    # 3. 體制劃分與部位對應
     def get_regime_info(s):
         if s > REGIME_CONFIG['Expansion']['minScore']: return 'Expansion'
         elif s > REGIME_CONFIG['Recovery']['minScore']: return 'Recovery'
@@ -122,20 +127,20 @@ def load_optimized_backtest():
 
 # 載入資料
 try:
-    with st.spinner("正在執行真實歷史數據載入與動態回測..."):
-        df_bt, df_details = load_optimized_backtest()
+    with st.spinner("正在下載行情數據..."):
+        raw_signals, returns = load_raw_market_data()
 except Exception as e:
     st.error(f"數據下載失敗: {e}")
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 3. Header & Detailed Modal 按鈕
+# 4. Header & Modal 按鈕
 # -----------------------------------------------------------------------------
 col_header, col_btn1, col_btn2 = st.columns([2.5, 1, 1])
 
 with col_header:
-    st.title("Adaptive Macro Regimes")
-    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates) | 動態對接真實數據")
+    st.title("Adaptive Macro Regimes Terminal")
+    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)")
 
 with col_btn1:
     if st.button("📄 論文出處與數據說明"):
@@ -147,10 +152,9 @@ with col_btn1:
             * Published in *The Journal of Portfolio Management*
             
             ---
-            **⚙️ 多重時間視窗 (Multi-Lookback Windows) 計算邏輯:**
-            1. **6 個月 (6M) 價格動能 (Raw Proxies):** S&P 500 (SPY)、高收益債/國債 (HYG/IEF)、長美債 (TLT)。
-            2. **36 個月 (36M) 滾動 Z-Score 標準化:** 轉化為標準分數 $N(0,1)$ 消除量綱差異。
-            3. **12 個月 (12M) 滾動 IC 適應性動態加權:** 根據 Rolling IC 動態給予預測力高的指標權重。
+            **⚙️ 靈活性參數設計:**
+            1. **Z-Score 滾動視窗 (12M - 60M):** 控制計算標準分數時的歷史參考記憶長度。
+            2. **IC 權重視窗 (3M - 24M):** 控制模型對近期因子失效/生效的適應靈敏度。
             """)
         show_paper_info()
 
@@ -160,8 +164,7 @@ with col_btn2:
         def show_strat_info():
             st.markdown("""
             **⏱️ 當月訊號預測下月 (Month T Signal for Month T+1 Allocation):**
-            * **調倉時序機制：** 模型於 **$T$ 月底**讀取當期與過去數據計算 Macro Score 並判定 Regime，用於決定 **$T+1$ 月**整個月的資產配置。
-            * **無未來偏誤 (No Look-Ahead Bias)：** 回測中嚴格採用 `.shift(1)` 機制。
+            * 模型於 **$T$ 月底**讀取當期與過去數據計算 Macro Score 並判定 Regime，用於決定 **$T+1$ 月**整個月的資產配置。
             
             ---
             **📊 體制判斷與資產配置矩陣:**
@@ -175,8 +178,31 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 指定月份體制動態查詢
+# 5. 參數控制與特定月份動態查詢 (Dynamic Parameter & Month Selector)
 # -----------------------------------------------------------------------------
+st.markdown("### 🎛️ 策略模型參數調校 (Model Parameter Control)")
+
+col_z, col_ic = st.columns(2)
+with col_z:
+    z_win_sel = st.slider(
+        "Z-Score 滾動視窗 (Z-Score Lookback Window - Months):",
+        min_value=12, max_value=60, value=36, step=6,
+        help="決定計算標準差與均值的歷史參考長度。預設 36 個月。"
+    )
+
+with col_ic:
+    ic_win_sel = st.slider(
+        "適應性 IC 權重視窗 (IC Weighting Lookback Window - Months):",
+        min_value=3, max_value=24, value=12, step=1,
+        help="決定統計因子與未來股市相關性的視窗。視窗越短，權重調整越靈敏。預設 12 個月。"
+    )
+
+# 根據選擇的參數動態重算模型
+df_bt, df_details = run_macro_model(raw_signals, returns, z_win_sel, ic_win_sel)
+
+st.divider()
+
+# 月份查詢
 all_months = df_details['Month_Str'].tolist()
 
 col_sel1, col_sel2 = st.columns([2, 3])
@@ -200,16 +226,15 @@ col_p1, col_p2, col_p3 = st.columns([1.2, 1.2, 1])
 
 with col_p1:
     st.markdown(f"### 當月標準化代理數據 (`{selected_month_str}`)")
-    st.metric("成長代理 Z-Score (前36M基準)", f"{m_g:+.2f}")
-    st.metric("信用代理 Z-Score (前36M基準)", f"{m_c:+.2f}")
-    st.metric("利率代理 Z-Score (前36M基準)", f"{m_r:+.2f}")
+    st.metric(f"成長代理 Z-Score (前{z_win_sel}M基準)", f"{m_g:+.2f}")
+    st.metric(f"信用代理 Z-Score (前{z_win_sel}M基準)", f"{m_c:+.2f}")
+    st.metric(f"利率代理 Z-Score (前{z_win_sel}M基準)", f"{m_r:+.2f}")
 
 with col_p2:
     st.markdown(f"### 當前體制判斷 (`{selected_month_str}`)")
     st.metric("當月適應性宏觀得分 (Macro Score)", f"{m_score:+.2f}")
     st.markdown(f"**當月判定體制：** <span style='color:{m_cfg['color']}; font-size: 1.25rem; font-weight: bold;'>{m_cfg['name']}</span>", unsafe_allow_html=True)
     st.markdown(f"**下月建議股票比重 (SPY)：** **{int(m_cfg['eqW']*100)}%**")
-    st.caption("註：此當月訊號用於決定下一個月 (T+1) 的資產配置比重")
 
 with col_p3:
     st.markdown("### 下月資產配置預測比重")
@@ -231,7 +256,7 @@ with col_p3:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 可選擇時間區間之動態回測
+# 6. 可選擇時間區間之動態回測 (Interactive Date Range Selector)
 # -----------------------------------------------------------------------------
 st.markdown("## 歷史體制動態回測 (Interactive Backtest Engine)")
 
@@ -256,9 +281,9 @@ sub_bt['SPY_Cum'] = (1 + sub_bt['SPY_Ret']).cumprod() * 100
 sub_bt['Strat_Cum'] = (1 + sub_bt['Strat_Ret']).cumprod() * 100
 
 # -----------------------------------------------------------------------------
-# 6. 回測表格與動態圖表
+# 7. 回測表格與動態圖表
 # -----------------------------------------------------------------------------
-st.markdown(f"### `{start_date_sel.strftime('%Y-%m')}` 至 `{end_date_sel.strftime('%Y-%m')}` 體制統計與月報酬率")
+st.markdown(f"### `{start_date_sel.strftime('%Y-%m')}` 至 `{end_date_sel.strftime('%Y-%m')}` 體制統計與月報酬率 (Z-Score: {z_win_sel}M, IC: {ic_win_sel}M)")
 
 stats_list = []
 sub_total_m = len(sub_bt)
@@ -284,7 +309,6 @@ st.table(pd.DataFrame(stats_list))
 # --- 走勢圖與色帶標示 ---
 st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Regime Bands)")
 
-# 顯示獨立高質感顏色圖例列 (HTML Legend Badges)
 st.markdown("""
 <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.8rem; font-size: 0.85rem;">
     <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width:12px; height:12px; background-color:#10B981; display:inline-block; border-radius:2px;"></span> 🟢 擴張 (Expansion)</span>
@@ -296,7 +320,7 @@ st.markdown("""
 
 fig_line = go.Figure()
 
-# 1. 繪製策略與基準折線 (確保以 Datetime 作為 X 軸)
+# 1. 折線圖
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
@@ -308,7 +332,7 @@ fig_line.add_trace(go.Scatter(
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
 
-# 2. 繪製背景體制色帶 (加上安全的時間戳記轉化)
+# 2. 背景色帶
 current_reg = None
 start_d = None
 
@@ -340,7 +364,7 @@ fig_line.update_layout(
         gridcolor='#334155'
     ),
     xaxis=dict(
-        type="date", # 強制設定 X 軸為日期型態
+        type="date",
         showgrid=False
     ),
     paper_bgcolor='rgba(0,0,0,0)',
@@ -360,7 +384,7 @@ fig_line.update_layout(
 st.plotly_chart(fig_line, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 7. 選定區間之核心 KPI 指標計算
+# 8. 選定區間之核心 KPI 指標計算
 # -----------------------------------------------------------------------------
 st.markdown("### 選定時間區間核心績效指標 (Selected Range KPI Metrics)")
 
@@ -379,7 +403,7 @@ b_cagr, b_vol, b_mdd, b_sharpe = calc_kpis(sub_bt['SPY_Ret'])
 
 kpi_data = [
     {
-        '投資策略名稱 (Strategy)': '適應性宏觀體制策略 (Adaptive Macro Strategy)',
+        '投資策略名稱 (Strategy)': f'適應性宏觀體制策略 (Z:{z_win_sel}M, IC:{ic_win_sel}M)',
         '區間年化報酬率 (CAGR)': f"+{s_cagr:.2f}%",
         '年化波動度 (Volatility)': f"{s_vol:.2f}%",
         '區間最大回撤 (Max Drawdown)': f"{s_mdd:.2f}%",
