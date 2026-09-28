@@ -109,7 +109,6 @@ def load_optimized_backtest():
         'Strat_Ret': strat_ret
     }, index=valid_idx)
     
-    # 建立以 YYYY-MM 為 Key 的詳細字典，確保 100% 避免 KeyError
     monthly_details = pd.DataFrame({
         'Month_Str': z_signals.index.strftime('%Y-%m'),
         'Macro_Score': macro_score,
@@ -130,7 +129,7 @@ except Exception as e:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 3. Header & Modal 按鈕
+# 3. Header & Detailed Modal 按鈕
 # -----------------------------------------------------------------------------
 col_header, col_btn1, col_btn2 = st.columns([2.5, 1, 1])
 
@@ -148,29 +147,40 @@ with col_btn1:
             * Published in *The Journal of Portfolio Management*
             
             ---
-            **⚙️ 核心機制:**
-            1. **36M 滾動 Z-Score 標準化：** 消除代理因子的量綱差異。
-            2. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息波段收益。
+            **⚙️ 多重時間視窗 (Multi-Lookback Windows) 計算邏輯:**
+            1. **6 個月 (6M) 價格動能 (Raw Proxies):**
+               * **成長代理 (Growth):** S&P 500 (SPY) 過去 6 個月累積報酬率。
+               * **信用利差 (Credit):** 高收益債 (HYG) / 中天期國債 (IEF) 過去 6 個月相對強度變化。
+               * **利率趨勢 (Rates):** 20年期長美債 (TLT) 過去 6 個月價格動能。
+            2. **36 個月 (36M) 滾動 Z-Score 標準化:**
+               * 將各代理因子的 6M 原始值減去過去 36 個月均值並除以標準差，轉化為標準分數 $N(0,1)$，消除不同資產類別的量綱差異。
+            3. **12 個月 (12M) 滾動 IC 適應性動態加權:**
+               * 統計過去 12 個月各因子對未來一期股票報酬的滾動相關性 (Information Coefficient, IC)，給予正預測力指標較高動態權重。
             """)
         show_paper_info()
 
 with col_btn2:
     if st.button("⚡ Adaptive Strategy 策略說明"):
-        @st.dialog("Adaptive Strategy 策略標的與買賣/調倉機制說明")
+        @st.dialog("Adaptive Strategy 策略標的與調倉時序說明")
         def show_strat_info():
             st.markdown("""
-            **📊 資產配置矩陣:**
+            **⏱️ 當月訊號預測下月 (Month T Signal for Month T+1 Allocation):**
+            * **調倉時序機制：** 模型於 **$T$ 月底**（如 2026-06 末）讀取當期與過去數據計算 Macro Score 並判定 Regime，用於決定 **$T+1$ 月**（如 2026-07 一整個月）的資產配置。
+            * **無未來偏誤 (No Look-Ahead Bias)：** 回測中嚴格採用 `.shift(1)` 機制，確保實戰執行時不包含任何未來未發生的行情資訊。
+            
+            ---
+            **📊 體制判斷與資產配置矩陣:**
             * **Expansion (> +0.30):** 100% SPY
-            * **Recovery (0.00 ~ +0.30):** 80% SPY / 20% Cash
-            * **Slowdown (-0.30 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash
-            * **Contraction (< -0.30):** 10% SPY / 60% TLT / 30% Cash
+            * **Recovery (0.00 ~ +0.30):** 80% SPY / 20% Cash (BIL)
+            * **Slowdown (-0.30 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash (BIL)
+            * **Contraction (< -0.30):** 10% SPY / 60% TLT / 30% Cash (BIL)
             """)
         show_strat_info()
 
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 指定月份體制動態查詢 (Month Lookup Selector - 已修正 KeyError 索引機制)
+# 4. 指定月份體制動態查詢 (Month Lookup Selector)
 # -----------------------------------------------------------------------------
 all_months = df_details['Month_Str'].tolist()
 
@@ -178,11 +188,10 @@ col_sel1, col_sel2 = st.columns([2, 3])
 with col_sel1:
     selected_month_str = st.selectbox(
         "🔍 選擇查詢月份 (Select Historical Month):",
-        options=all_months[::-1],  # 最新月份在最上面
+        options=all_months[::-1],
         index=0
     )
 
-# 使用字串安全篩選
 m_row = df_details[df_details['Month_Str'] == selected_month_str].iloc[0]
 
 m_score = m_row['Macro_Score']
@@ -196,18 +205,19 @@ col_p1, col_p2, col_p3 = st.columns([1.2, 1.2, 1])
 
 with col_p1:
     st.markdown(f"### 當月標準化代理數據 (`{selected_month_str}`)")
-    st.metric("成長代理 Z-Score", f"{m_g:+.2f}")
-    st.metric("信用代理 Z-Score", f"{m_c:+.2f}")
-    st.metric("利率代理 Z-Score", f"{m_r:+.2f}")
+    st.metric("成長代理 Z-Score (前36M基準)", f"{m_g:+.2f}")
+    st.metric("信用代理 Z-Score (前36M基準)", f"{m_c:+.2f}")
+    st.metric("利率代理 Z-Score (前36M基準)", f"{m_r:+.2f}")
 
 with col_p2:
     st.markdown(f"### 當前體制判斷 (`{selected_month_str}`)")
     st.metric("當月適應性宏觀得分 (Macro Score)", f"{m_score:+.2f}")
-    st.markdown(f"**判定體制：** <span style='color:{m_cfg['color']}; font-size: 1.25rem; font-weight: bold;'>{m_cfg['name']}</span>", unsafe_allow_html=True)
-    st.markdown(f"**建議股票比重 (SPY)：** **{int(m_cfg['eqW']*100)}%**")
+    st.markdown(f"**當月判定體制：** <span style='color:{m_cfg['color']}; font-size: 1.25rem; font-weight: bold;'>{m_cfg['name']}</span>", unsafe_allow_html=True)
+    st.markdown(f"**下月建議股票比重 (SPY)：** **{int(m_cfg['eqW']*100)}%**")
+    st.caption("註：此當月訊號用於決定下一個月 (T+1) 的資產配置比重")
 
 with col_p3:
-    st.markdown("### 當月資產配置比重")
+    st.markdown("### 下月資產配置預測比重")
     fig_donut = go.Figure(data=[go.Pie(
         labels=['股票 (SPY)', '長債 (TLT)', '現金 (BIL)'],
         values=[m_cfg['eqW']*100, m_cfg['tltW']*100, m_cfg['cashW']*100],
@@ -241,14 +251,12 @@ start_date_sel, end_date_sel = st.slider(
     format="YYYY-MM"
 )
 
-# 根據選擇裁切資料
 sub_bt = df_bt.loc[pd.to_datetime(start_date_sel):pd.to_datetime(end_date_sel)].copy()
 
 if len(sub_bt) < 2:
     st.warning("請選擇包含至少兩個月以上的時間區間。")
     st.stop()
 
-# 動態重新計算該區間的累積報酬率 (起點歸一為 100)
 sub_bt['SPY_Cum'] = (1 + sub_bt['SPY_Ret']).cumprod() * 100
 sub_bt['Strat_Cum'] = (1 + sub_bt['Strat_Ret']).cumprod() * 100
 
@@ -278,7 +286,6 @@ for key, c in REGIME_CONFIG.items():
 
 st.table(pd.DataFrame(stats_list))
 
-# 折線圖與背景體制色帶
 st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Regime Bands)")
 
 fig_line = go.Figure()
@@ -307,7 +314,6 @@ if current_reg is not None:
         opacity=1.0, layer="below", line_width=0
     )
 
-# 淨值折線
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
