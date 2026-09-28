@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
-from datetime import datetime
 
 # -----------------------------------------------------------------------------
 # 1. 頁面基本配置 (Dark Theme Layout)
@@ -14,17 +13,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# 套用 CSS 樣式以貼近原先 HTML 的深色精緻質感
+# 套用 CSS 樣式以貼近 HTML 的深色質感
 st.markdown("""
 <style>
     .stApp { background-color: #0F172A; color: #F8FAFC; }
-    .css-1r6slb0, .stCard { background-color: #1E293B; border: 1px solid #334155; border-radius: 0.75rem; padding: 1.25rem; }
-    .metric-box { background-color: #0F172A; border: 1px solid #1E293B; border-radius: 0.5rem; text-align: center; padding: 1rem; }
-    div[data-testid="stMetricValue"] { font-size: 2.25rem; font-weight: 800; }
+    .stTable { background-color: #1E293B; border-radius: 0.5rem; }
+    div[data-testid="stMetricValue"] { font-size: 2rem; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
-# 體制設定矩陣
 REGIME_CONFIG = {
     'Expansion': {'minScore': 0.20, 'name': '擴張期 (Expansion)', 'color': '#10B981', 'eqW': 1.00, 'cashW': 0.00},
     'Recovery':  {'minScore': 0.00, 'name': '復甦期 (Recovery)',  'color': '#3B82F6', 'eqW': 0.70, 'cashW': 0.30},
@@ -33,7 +30,7 @@ REGIME_CONFIG = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 自動抓取真實行情與回測計算 (yfinance + 24H Cache)
+# 2. 自動抓取真實行情與回測計算 (已修正 KeyError 欄位問題)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
 def load_real_data_and_backtest():
@@ -45,8 +42,19 @@ def load_real_data_and_backtest():
         'Cash': 'VFISX'         # 短期國債 (BIL 代理)
     }
     
-    # 抓取自 1990 年迄今真實歷史數據
-    df = yf.download(list(tickers.values()), start="1990-01-01")['Adj Close']
+    # 使用 auto_adjust=True 確保直接取得調整後收盤價，避開 MultiIndex KeyError
+    raw_df = yf.download(list(tickers.values()), start="1990-01-01", auto_adjust=True)
+    
+    # 處理 yfinance 回傳的多重索引或單一欄位結構
+    if isinstance(raw_df.columns, pd.MultiIndex):
+        if 'Close' in raw_df.columns.levels[0]:
+            df = raw_df['Close']
+        else:
+            df = raw_df.iloc[:, :len(tickers)]
+    else:
+        df = raw_df
+
+    # 重新命名欄位
     df = df.rename(columns={v: k for k, v in tickers.items()}).dropna()
     
     monthly_data = df.resample('ME').last()
@@ -54,12 +62,12 @@ def load_real_data_and_backtest():
     
     # 代理因子計算 (6M Momentum)
     sig_growth = monthly_data['Equity'].pct_change(6)
-    sig_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6) # HYG/IEF
+    sig_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6)
     sig_rates = monthly_data['LongTreasury'].pct_change(6)
     
     signals = pd.DataFrame({'Growth': sig_growth, 'Credit': sig_credit, 'Rates': sig_rates}).dropna()
     
-    # 12 個月滾動 IC 算算動態適應性權重
+    # 12 個月滾動 IC 計算動態權重
     fwd_ret = returns['Equity'].shift(-1)
     rolling_ic = pd.DataFrame(index=signals.index)
     for col in signals.columns:
@@ -78,7 +86,7 @@ def load_real_data_and_backtest():
         else: return 'Contraction', 0.10
         
     regimes = macro_score.map(lambda s: get_regime_info(s)[0])
-    eq_weights = macro_score.map(lambda s: get_regime_info(s)[1]).shift(1) # 無未來資訊偏誤
+    eq_weights = macro_score.map(lambda s: get_regime_info(s)[1]).shift(1)
     
     valid_idx = eq_weights.dropna().index
     ret_eq = returns['Equity'].loc[valid_idx]
@@ -96,7 +104,6 @@ def load_real_data_and_backtest():
         'Strat_Cum': (1 + strat_ret).cumprod() * 100
     }, index=valid_idx)
     
-    # 取得最新一期代理因子與得分
     latest_date = macro_score.index[-1].strftime('%Y-%m')
     latest_score = macro_score.iloc[-1]
     latest_growth = signals['Growth'].iloc[-1]
@@ -105,39 +112,42 @@ def load_real_data_and_backtest():
     
     return backtest_df, latest_date, latest_score, latest_growth, latest_credit, latest_rates
 
-# 載入數據
-with st.spinner("正在連線下載真實市場歷史數據並執行適應性回測..."):
-    df_bt, latest_date, latest_score, latest_g, latest_c, latest_r = load_real_data_and_backtest()
+# 執行載入
+try:
+    with st.spinner("正在連線下載真實市場數據..."):
+        df_bt, latest_date, latest_score, latest_g, latest_c, latest_r = load_real_data_and_backtest()
+except Exception as e:
+    st.error(f"數據下載失敗，請重新整理頁面。錯誤細節: {e}")
+    st.stop()
 
 # -----------------------------------------------------------------------------
-# 3. 頁面 Header & Modal 彈出視窗對齊 HTML 版本
+# 3. Header & Modal 按鈕
 # -----------------------------------------------------------------------------
 col_header, col_btn1, col_btn2 = st.columns([2.5, 1, 1])
 
 with col_header:
     st.title("Adaptive Macro Regimes")
-    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates) | 連線真實行情自動更新")
+    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)")
 
 with col_btn1:
     if st.button("📄 論文出處與數據說明"):
         @st.dialog("論文出處與金融代理數據計算說明")
         def show_paper_info():
             st.markdown("""
-            **📄 參考學術論文 (Reference Paper):**
+            **📄 參考學術論文:**
             * *Adaptive Macro Regimes for Dynamic Equity Allocation* (Jim Masturzo, Omid Shakernia, Alex Pickard)
             * Published in *The Journal of Portfolio Management*
             
             ---
             **💡 為什麼採用「金融市場價格」取代「經濟數據」？**
-            * **發布延遲 (Publication Lag)：** 官方數據 (GDP, CPI) 通常延遲 1~2 個月，發布時市場早已計價。
-            * **經常性修正 (Data Revisions)：** 初值常大幅修改，不適合實務即時交易。
-            * 本系統採用無延遲的高頻市場價格作為代理指標。
+            * **發布延遲 (Publication Lag)：** 官方數據 (GDP, CPI) 通常延遲 1~2 個月。
+            * **經常性修正 (Data Revisions)：** 初值常大幅修改。
             
             ---
             **⚙️ 三個代理數據計算邏輯:**
-            1. **經濟成長 (Growth):** S&P 500 (VFINX/SPY) 過去 6 個月報酬率。
-            2. **信用利差 (Credit Spread):** 高收益債 (VWEHX/HYG) 對中天期國債 (VFITX/IEF) 之相對強度 6M 變化。
-            3. **利率趨勢 (Rates):** 20年期美債 (VUSTX/TLT) 過去 6 個月價格動能。
+            1. **經濟成長 (Growth):** S&P 500 (VFINX/SPY) 6M 報酬率。
+            2. **信用利差 (Credit Spread):** 高收益債 (VWEHX/HYG) / 中天期國債 (VFITX/IEF) 6M 相對強度。
+            3. **利率趨勢 (Rates):** 20年期美債 (VUSTX/TLT) 6M 報酬率。
             """)
         show_paper_info()
 
@@ -146,12 +156,9 @@ with col_btn2:
         @st.dialog("Adaptive Strategy 策略標的與買賣/調倉機制說明")
         def show_strat_info():
             st.markdown("""
-            **🎯 交易標的 (Trading Universe):**
+            **🎯 交易標的:**
             * **Risk-On (股票):** S&P 500 ETF (SPY)
             * **Risk-Off (現金/短債):** 1-3M 短債/現金 (BIL)
-            
-            **⏱️ 調倉頻率 (Rebalancing):**
-            * 每月最後一個交易日計算最新 Macro Score，於下個月首個交易日調整部位。
             
             ---
             **📊 買賣與部位劃分矩陣:**
@@ -165,7 +172,7 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 當前最新一期數據與體制判斷面板 (Top Section)
+# 4. 當前體制面板
 # -----------------------------------------------------------------------------
 col_p1, col_p2, col_p3 = st.columns([1.2, 1.2, 1])
 
@@ -177,8 +184,6 @@ with col_p1:
 
 with col_p2:
     st.markdown("### 當前體制判斷 (Real-time)")
-    
-    # 計算當前 Regime
     if latest_score > 0.20: current_rKey = 'Expansion'
     elif latest_score > 0.00: current_rKey = 'Recovery'
     elif latest_score > -0.20: current_rKey = 'Slowdown'
@@ -210,11 +215,10 @@ with col_p3:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 歷史真實數據回測與月報酬統計 (Backtest & Performance Table)
+# 5. 回測表格與圖表
 # -----------------------------------------------------------------------------
 st.markdown("## 歷史體制回測與資產月報酬率 (1991 - 2026 真實歷史數據)")
 
-# 四大體制統計
 stats_list = []
 total_m = len(df_bt)
 
@@ -222,7 +226,6 @@ for key, c in REGIME_CONFIG.items():
     sub = df_bt[df_bt['Regime'] == key]
     cnt = len(sub)
     pct = (cnt / total_m) * 100 if total_m > 0 else 0
-    
     avg_spy = sub['SPY_Ret'].mean() * 100 if cnt > 0 else 0
     avg_cash = sub['Cash_Ret'].mean() * 100 if cnt > 0 else 0
     avg_strat = sub['Strat_Ret'].mean() * 100 if cnt > 0 else 0
@@ -237,27 +240,21 @@ for key, c in REGIME_CONFIG.items():
 
 st.table(pd.DataFrame(stats_list))
 
-# -----------------------------------------------------------------------------
-# 6. 累積淨值曲線圖 (Plotly Line Chart)
-# -----------------------------------------------------------------------------
 st.markdown("### 歷史資產累積報酬率曲線 (Cumulative Equity Curves)")
 
 fig_line = go.Figure()
-
 fig_line.add_trace(go.Scatter(
     x=df_bt.index, y=df_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
     line=dict(color='#10B981', width=2)
 ))
-
 fig_line.add_trace(go.Scatter(
     x=df_bt.index, y=df_bt['SPY_Cum'],
     mode='lines', name='買入持有 S&P 500 (Buy & Hold SPY)',
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
-
 fig_line.update_layout(
-    yaxis_type="log", # 使用對數坐標軸展示跨三十年複利
+    yaxis_type="log",
     paper_bgcolor='rgba(0,0,0,0)',
     plot_bgcolor='rgba(0,0,0,0)',
     font=dict(color='#94A3B8'),
@@ -266,12 +263,8 @@ fig_line.update_layout(
     margin=dict(t=20, b=20, l=10, r=10),
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
-
 st.plotly_chart(fig_line, use_container_width=True)
 
-# -----------------------------------------------------------------------------
-# 7. 策略核心 KPI 對比表格 (CAGR, Vol, MDD, Sharpe)
-# -----------------------------------------------------------------------------
 st.markdown("### 策略核心績效指標對比表 (KPI Metrics)")
 
 def calc_kpis(ret_series):
