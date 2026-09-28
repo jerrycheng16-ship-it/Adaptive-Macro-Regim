@@ -30,7 +30,7 @@ REGIME_CONFIG = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 自動抓取真實行情與回測計算 (已修正 KeyError 欄位問題)
+# 2. 自動抓取真實行情與回測計算 (已修正 pandas 2.1+ .map 相容性問題)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
 def load_real_data_and_backtest():
@@ -42,7 +42,7 @@ def load_real_data_and_backtest():
         'Cash': 'VFISX'         # 短期國債 (BIL 代理)
     }
     
-    # 使用 auto_adjust=True 確保直接取得調整後收盤價，避開 MultiIndex KeyError
+    # 使用 auto_adjust=True 確保直接取得調整後收盤價
     raw_df = yf.download(list(tickers.values()), start="1990-01-01", auto_adjust=True)
     
     # 處理 yfinance 回傳的多重索引或單一欄位結構
@@ -73,7 +73,8 @@ def load_real_data_and_backtest():
     for col in signals.columns:
         rolling_ic[col] = signals[col].rolling(12).corr(fwd_ret)
         
-    weights = rolling_ic.applymap(lambda x: max(x, 0) if pd.notnull(x) else 0)
+    # 相容 pandas 新版 (用 .map 替代已廢棄的 .applymap)
+    weights = rolling_ic.map(lambda x: max(x, 0) if pd.notnull(x) else 0)
     weight_sum = weights.sum(axis=1).replace(0, 1)
     weights = weights.div(weight_sum, axis=0)
     
