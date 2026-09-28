@@ -148,14 +148,9 @@ with col_btn1:
             
             ---
             **⚙️ 多重時間視窗 (Multi-Lookback Windows) 計算邏輯:**
-            1. **6 個月 (6M) 價格動能 (Raw Proxies):**
-               * **成長代理 (Growth):** S&P 500 (SPY) 過去 6 個月累積報酬率。
-               * **信用利差 (Credit):** 高收益債 (HYG) / 中天期國債 (IEF) 過去 6 個月相對強度變化。
-               * **利率趨勢 (Rates):** 20年期長美債 (TLT) 過去 6 個月價格動能。
-            2. **36 個月 (36M) 滾動 Z-Score 標準化:**
-               * 將各代理因子的 6M 原始值減去過去 36 個月均值並除以標準差，轉化為標準分數 $N(0,1)$，消除不同資產類別的量綱差異。
-            3. **12 個月 (12M) 滾動 IC 適應性動態加權:**
-               * 統計過去 12 個月各因子對未來一期股票報酬的滾動相關性 (Information Coefficient, IC)，給予正預測力指標較高動態權重。
+            1. **6 個月 (6M) 價格動能 (Raw Proxies):** S&P 500 (SPY)、高收益債/國債 (HYG/IEF)、長美債 (TLT)。
+            2. **36 個月 (36M) 滾動 Z-Score 標準化:** 轉化為標準分數 $N(0,1)$ 消除量綱差異。
+            3. **12 個月 (12M) 滾動 IC 適應性動態加權:** 根據 Rolling IC 動態給予預測力高的指標權重。
             """)
         show_paper_info()
 
@@ -165,8 +160,8 @@ with col_btn2:
         def show_strat_info():
             st.markdown("""
             **⏱️ 當月訊號預測下月 (Month T Signal for Month T+1 Allocation):**
-            * **調倉時序機制：** 模型於 **$T$ 月底**（如 2026-06 末）讀取當期與過去數據計算 Macro Score 並判定 Regime，用於決定 **$T+1$ 月**（如 2026-07 一整個月）的資產配置。
-            * **無未來偏誤 (No Look-Ahead Bias)：** 回測中嚴格採用 `.shift(1)` 機制，確保實戰執行時不包含任何未來未發生的行情資訊。
+            * **調倉時序機制：** 模型於 **$T$ 月底**讀取當期與過去數據計算 Macro Score 並判定 Regime，用於決定 **$T+1$ 月**整個月的資產配置。
+            * **無未來偏誤 (No Look-Ahead Bias)：** 回測中嚴格採用 `.shift(1)` 機制。
             
             ---
             **📊 體制判斷與資產配置矩陣:**
@@ -180,7 +175,7 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 指定月份體制動態查詢 (Month Lookup Selector)
+# 4. 指定月份體制動態查詢
 # -----------------------------------------------------------------------------
 all_months = df_details['Month_Str'].tolist()
 
@@ -236,7 +231,7 @@ with col_p3:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 可選擇時間區間之動態回測 (Interactive Date Range Selector)
+# 5. 可選擇時間區間之動態回測
 # -----------------------------------------------------------------------------
 st.markdown("## 歷史體制動態回測 (Interactive Backtest Engine)")
 
@@ -261,7 +256,7 @@ sub_bt['SPY_Cum'] = (1 + sub_bt['SPY_Ret']).cumprod() * 100
 sub_bt['Strat_Cum'] = (1 + sub_bt['Strat_Ret']).cumprod() * 100
 
 # -----------------------------------------------------------------------------
-# 6. 回測表格與動態圖表 (含背景色帶 Legend 圖例)
+# 6. 回測表格與動態圖表
 # -----------------------------------------------------------------------------
 st.markdown(f"### `{start_date_sel.strftime('%Y-%m')}` 至 `{end_date_sel.strftime('%Y-%m')}` 體制統計與月報酬率")
 
@@ -286,46 +281,22 @@ for key, c in REGIME_CONFIG.items():
 
 st.table(pd.DataFrame(stats_list))
 
+# --- 走勢圖與色帶標示 ---
 st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Regime Bands)")
+
+# 顯示獨立高質感顏色圖例列 (HTML Legend Badges)
+st.markdown("""
+<div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.8rem; font-size: 0.85rem;">
+    <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width:12px; height:12px; background-color:#10B981; display:inline-block; border-radius:2px;"></span> 🟢 擴張 (Expansion)</span>
+    <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width:12px; height:12px; background-color:#3B82F6; display:inline-block; border-radius:2px;"></span> 🔵 復甦 (Recovery)</span>
+    <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width:12px; height:12px; background-color:#F59E0B; display:inline-block; border-radius:2px;"></span> 🟡 放緩 (Slowdown)</span>
+    <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width:12px; height:12px; background-color:#EF4444; display:inline-block; border-radius:2px;"></span> 🔴 收縮 (Contraction)</span>
+</div>
+""", unsafe_allow_html=True)
 
 fig_line = go.Figure()
 
-# 1. 繪製背景體制色帶
-current_reg = None
-start_d = None
-
-for i in range(len(sub_bt)):
-    date = sub_bt.index[i]
-    reg = sub_bt['Regime'].iloc[i]
-    
-    if reg != current_reg:
-        if current_reg is not None:
-            fig_line.add_vrect(
-                x0=start_d, x1=date,
-                fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
-                opacity=1.0, layer="below", line_width=0
-            )
-        current_reg = reg
-        start_d = date
-
-if current_reg is not None:
-    fig_line.add_vrect(
-        x0=start_d, x1=sub_bt.index[-1],
-        fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
-        opacity=1.0, layer="below", line_width=0
-    )
-
-# 2. 手動在圖表中加入四大體制的背景顏色對應圖例 (Legend Traces)
-for key, c in REGIME_CONFIG.items():
-    fig_line.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=12, color=c['color'], symbol='square'),
-        name=f"色帶: {c['name']}",
-        showlegend=True
-    ))
-
-# 3. 繪製策略與基準之淨值折線
+# 1. 繪製策略與基準折線 (確保以 Datetime 作為 X 軸)
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
@@ -337,17 +308,45 @@ fig_line.add_trace(go.Scatter(
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
 
+# 2. 繪製背景體制色帶 (加上安全的時間戳記轉化)
+current_reg = None
+start_d = None
+
+for i in range(len(sub_bt)):
+    date = sub_bt.index[i]
+    reg = sub_bt['Regime'].iloc[i]
+    
+    if reg != current_reg:
+        if current_reg is not None:
+            fig_line.add_vrect(
+                x0=start_d.strftime('%Y-%m-%d'), x1=date.strftime('%Y-%m-%d'),
+                fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
+                opacity=1.0, layer="below", line_width=0
+            )
+        current_reg = reg
+        start_d = date
+
+if current_reg is not None:
+    fig_line.add_vrect(
+        x0=start_d.strftime('%Y-%m-%d'), x1=sub_bt.index[-1].strftime('%Y-%m-%d'),
+        fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
+        opacity=1.0, layer="below", line_width=0
+    )
+
 fig_line.update_layout(
     yaxis_type="log",
     yaxis=dict(
         tickformat="$~s",
         gridcolor='#334155'
     ),
-    xaxis=dict(showgrid=False),
+    xaxis=dict(
+        type="date", # 強制設定 X 軸為日期型態
+        showgrid=False
+    ),
     paper_bgcolor='rgba(0,0,0,0)',
     plot_bgcolor='rgba(0,0,0,0)',
     font=dict(color='#94A3B8'),
-    margin=dict(t=20, b=20, l=10, r=10),
+    margin=dict(t=10, b=10, l=10, r=10),
     legend=dict(
         orientation="h",
         yanchor="bottom",
