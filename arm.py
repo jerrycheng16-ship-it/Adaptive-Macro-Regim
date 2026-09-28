@@ -17,7 +17,7 @@ st.markdown("""
 <style>
     .stApp { background-color: #0F172A; color: #F8FAFC; }
     .stTable { background-color: #1E293B; border-radius: 0.5rem; }
-    div[data-testid="stMetricValue"] { font-size: 2rem; font-weight: 800; }
+    div[data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -29,7 +29,7 @@ REGIME_CONFIG = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 論文優化版：Z-Score 標準化 + 權重平滑 + 多資產避險引擎
+# 2. 數據載入與優化版回測引擎
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
 def load_optimized_backtest():
@@ -106,25 +106,25 @@ def load_optimized_backtest():
         'Regime': regimes.loc[valid_idx],
         'SPY_Ret': ret_eq,
         'Cash_Ret': ret_cash,
-        'Strat_Ret': strat_ret,
-        'SPY_Cum': (1 + ret_eq).cumprod() * 100,
-        'Strat_Cum': (1 + strat_ret).cumprod() * 100
+        'Strat_Ret': strat_ret
     }, index=valid_idx)
     
-    latest_date = macro_score.index[-1].strftime('%Y-%m')
-    latest_score = macro_score.iloc[-1]
-    latest_growth = z_signals['Growth'].iloc[-1]
-    latest_credit = z_signals['Credit'].iloc[-1]
-    latest_rates = z_signals['Rates'].iloc[-1]
+    monthly_details = pd.DataFrame({
+        'Macro_Score': macro_score,
+        'Growth_Z': z_signals['Growth'],
+        'Credit_Z': z_signals['Credit'],
+        'Rates_Z': z_signals['Rates'],
+        'Regime': regimes
+    }, index=z_signals.index)
     
-    return backtest_df, latest_date, latest_score, latest_growth, latest_credit, latest_rates
+    return backtest_df, monthly_details
 
-# 執行載入
+# 載入資料
 try:
-    with st.spinner("正在執行優化版真實歷史數據回測..."):
-        df_bt, latest_date, latest_score, latest_g, latest_c, latest_r = load_optimized_backtest()
+    with st.spinner("正在執行真實歷史數據載入與動態回測..."):
+        df_bt, df_details = load_optimized_backtest()
 except Exception as e:
-    st.error(f"數據下載或回測失敗，細節: {e}")
+    st.error(f"數據下載失敗: {e}")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -134,7 +134,7 @@ col_header, col_btn1, col_btn2 = st.columns([2.5, 1, 1])
 
 with col_header:
     st.title("Adaptive Macro Regimes")
-    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates) | Z-Score 優化版")
+    st.caption("Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates) | 動態對接真實數據")
 
 with col_btn1:
     if st.button("📄 論文出處與數據說明"):
@@ -146,10 +146,9 @@ with col_btn1:
             * Published in *The Journal of Portfolio Management*
             
             ---
-            **⚙️ 本版優化核心機制:**
-            1. **36M 滾動 Z-Score 標準化：** 將代理因子進行標準化，避免指標尺度差異造成體制判定偏誤。
-            2. **權重平滑機制 (Smoothing Epsilon)：** 保留基礎權重，防止因子無謂失效時分數停滯於零。
-            3. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息週期的資本利得。
+            **⚙️ 核心機制:**
+            1. **36M 滾動 Z-Score 標準化：** 消除代理因子的量綱差異。
+            2. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息波段收益。
             """)
         show_paper_info()
 
@@ -158,7 +157,7 @@ with col_btn2:
         @st.dialog("Adaptive Strategy 策略標的與買賣/調倉機制說明")
         def show_strat_info():
             st.markdown("""
-            **📊 優化版資產配置矩陣:**
+            **📊 資產配置矩陣:**
             * **Expansion (> +0.30):** 100% SPY
             * **Recovery (0.00 ~ +0.30):** 80% SPY / 20% Cash
             * **Slowdown (-0.30 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash
@@ -169,36 +168,48 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 當前體制面板
+# 4. 指定月份體制動態查詢 (Month Lookup Selector)
 # -----------------------------------------------------------------------------
+all_months = df_details.index.strftime('%Y-%m').tolist()
+
+col_sel1, col_sel2 = st.columns([2, 3])
+with col_sel1:
+    selected_month_str = st.selectbox(
+        "🔍 選擇查詢月份 (Select Historical Month):",
+        options=all_months[::-1],  # 預設最新的月份在最上面
+        index=0
+    )
+
+selected_date = pd.to_datetime(selected_month_str)
+m_row = df_details.loc[selected_date]
+m_score = m_row['Macro_Score']
+m_g = m_row['Growth_Z']
+m_c = m_row['Credit_Z']
+m_r = m_row['Rates_Z']
+m_regime = m_row['Regime']
+m_cfg = REGIME_CONFIG[m_regime]
+
 col_p1, col_p2, col_p3 = st.columns([1.2, 1.2, 1])
 
 with col_p1:
-    st.markdown(f"### 當月標準化代理數據 (`{latest_date}`)")
-    st.metric("成長代理 Z-Score", f"{latest_g:+.2f}")
-    st.metric("信用代理 Z-Score", f"{latest_c:+.2f}")
-    st.metric("利率代理 Z-Score", f"{latest_r:+.2f}")
+    st.markdown(f"### 當月標準化代理數據 (`{selected_month_str}`)")
+    st.metric("成長代理 Z-Score", f"{m_g:+.2f}")
+    st.metric("信用代理 Z-Score", f"{m_c:+.2f}")
+    st.metric("利率代理 Z-Score", f"{m_r:+.2f}")
 
 with col_p2:
-    st.markdown("### 當前體制判斷 (Real-time)")
-    if latest_score > REGIME_CONFIG['Expansion']['minScore']: current_rKey = 'Expansion'
-    elif latest_score > REGIME_CONFIG['Recovery']['minScore']: current_rKey = 'Recovery'
-    elif latest_score > REGIME_CONFIG['Slowdown']['minScore']: current_rKey = 'Slowdown'
-    else: current_rKey = 'Contraction'
-    
-    cfg = REGIME_CONFIG[current_rKey]
-    
-    st.metric("當前適應性宏觀得分 (Macro Score)", f"{latest_score:+.2f}")
-    st.markdown(f"**當前體制：** <span style='color:{cfg['color']}; font-size: 1.25rem; font-weight: bold;'>{cfg['name']}</span>", unsafe_allow_html=True)
-    st.markdown(f"**建議股票比重 (SPY)：** **{int(cfg['eqW']*100)}%**")
+    st.markdown(f"### 當前體制判斷 (`{selected_month_str}`)")
+    st.metric("當月適應性宏觀得分 (Macro Score)", f"{m_score:+.2f}")
+    st.markdown(f"**判定體制：** <span style='color:{m_cfg['color']}; font-size: 1.25rem; font-weight: bold;'>{m_cfg['name']}</span>", unsafe_allow_html=True)
+    st.markdown(f"**建議股票比重 (SPY)：** **{int(m_cfg['eqW']*100)}%**")
 
 with col_p3:
-    st.markdown("### 資產配置比重")
+    st.markdown("### 當月資產配置比重")
     fig_donut = go.Figure(data=[go.Pie(
         labels=['股票 (SPY)', '長債 (TLT)', '現金 (BIL)'],
-        values=[cfg['eqW']*100, cfg['tltW']*100, cfg['cashW']*100],
+        values=[m_cfg['eqW']*100, m_cfg['tltW']*100, m_cfg['cashW']*100],
         hole=.6,
-        marker_colors=[cfg['color'], '#6366F1', '#334155']
+        marker_colors=[m_cfg['color'], '#6366F1', '#334155']
     )])
     fig_donut.update_layout(
         showlegend=True,
@@ -212,24 +223,55 @@ with col_p3:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. 回測表格與圖表
+# 5. 可選擇時間區間之動態回測 (Interactive Date Range Selector)
 # -----------------------------------------------------------------------------
-st.markdown("## 歷史體制回測與資產月報酬率 (優化版真實歷史數據)")
+st.markdown("## 歷史體制動態回測 (Interactive Backtest Engine)")
+
+min_bdate = df_bt.index.min().date()
+max_bdate = df_bt.index.max().date()
+
+# 區間選擇介面
+col_slider, col_presets = st.columns([2.5, 1.5])
+
+with col_slider:
+    start_date_sel, end_date_sel = st.slider(
+        "📅 調整歷史回測時間區間 (Select Backtest Range):",
+        min_value=min_bdate,
+        max_value=max_bdate,
+        value=(min_bdate, max_bdate),
+        format="YYYY-MM"
+    )
+
+# 根據選擇裁切資料
+sub_bt = df_bt.loc[pd.to_datetime(start_date_sel):pd.to_datetime(end_date_sel)].copy()
+
+if len(sub_bt) < 2:
+    st.warning("請選擇包含至少兩個月以上的時間區間。")
+    st.stop()
+
+# 動態重新計算該區間的累積報酬率 (起點歸一為 100)
+sub_bt['SPY_Cum'] = (1 + sub_bt['SPY_Ret']).cumprod() * 100
+sub_bt['Strat_Cum'] = (1 + sub_bt['Strat_Ret']).cumprod() * 100
+
+# -----------------------------------------------------------------------------
+# 6. 回測表格與動態圖表
+# -----------------------------------------------------------------------------
+st.markdown(f"### `{start_date_sel.strftime('%Y-%m')}` 至 `{end_date_sel.strftime('%Y-%m')}` 體制統計與月報酬率")
 
 stats_list = []
-total_m = len(df_bt)
+sub_total_m = len(sub_bt)
 
 for key, c in REGIME_CONFIG.items():
-    sub = df_bt[df_bt['Regime'] == key]
-    cnt = len(sub)
-    pct = (cnt / total_m) * 100 if total_m > 0 else 0
-    avg_spy = sub['SPY_Ret'].mean() * 100 if cnt > 0 else 0
-    avg_cash = sub['Cash_Ret'].mean() * 100 if cnt > 0 else 0
-    avg_strat = sub['Strat_Ret'].mean() * 100 if cnt > 0 else 0
+    s_df = sub_bt[sub_bt['Regime'] == key]
+    cnt = len(s_df)
+    pct = (cnt / sub_total_m) * 100 if sub_total_m > 0 else 0
+    avg_spy = s_df['SPY_Ret'].mean() * 100 if cnt > 0 else 0
+    avg_cash = s_df['Cash_Ret'].mean() * 100 if cnt > 0 else 0
+    avg_strat = s_df['Strat_Ret'].mean() * 100 if cnt > 0 else 0
     
     stats_list.append({
         '宏觀體制 (Regime)': c['name'],
-        '歷史月份數 (佔比)': f"{cnt} 個月 ({pct:.1f}%)",
+        '區間內月份數 (佔比)': f"{cnt} 個月 ({pct:.1f}%)",
         '股票 (SPY) 月報酬': f"{avg_spy:+.2f}%",
         '現金/短債 (BIL) 月報酬': f"{avg_cash:+.2f}%",
         '適應性策略 (Strategy) 月報酬': f"{avg_strat:+.2f}%"
@@ -237,53 +279,52 @@ for key, c in REGIME_CONFIG.items():
 
 st.table(pd.DataFrame(stats_list))
 
-# --- 圖表與背景體制色帶區塊 ---
-st.markdown("### 歷史資產累積報酬率曲線與背景體制色帶 (Cumulative Equity Curves with Regime Bands)")
+# 折線圖與背景體制色帶
+st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Regime Bands)")
 
 fig_line = go.Figure()
 
-# 1. 繪製背景體制色帶 (Merging Continuous Regimes)
-current_regime = None
-start_date = None
+# 背景體制區塊
+current_reg = None
+start_d = None
 
-for i in range(len(df_bt)):
-    date = df_bt.index[i]
-    reg = df_bt['Regime'].iloc[i]
+for i in range(len(sub_bt)):
+    date = sub_bt.index[i]
+    reg = sub_bt['Regime'].iloc[i]
     
-    if reg != current_regime:
-        if current_regime is not None:
+    if reg != current_reg:
+        if current_reg is not None:
             fig_line.add_vrect(
-                x0=start_date, x1=date,
-                fillcolor=REGIME_CONFIG[current_regime]['bgColor'],
+                x0=start_d, x1=date,
+                fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
                 opacity=1.0, layer="below", line_width=0
             )
-        current_regime = reg
-        start_date = date
+        current_reg = reg
+        start_d = date
 
-if current_regime is not None:
+if current_reg is not None:
     fig_line.add_vrect(
-        x0=start_date, x1=df_bt.index[-1],
-        fillcolor=REGIME_CONFIG[current_regime]['bgColor'],
+        x0=start_d, x1=sub_bt.index[-1],
+        fillcolor=REGIME_CONFIG[current_reg]['bgColor'],
         opacity=1.0, layer="below", line_width=0
     )
 
-# 2. 繪製淨值折線
+# 淨值折線
 fig_line.add_trace(go.Scatter(
-    x=df_bt.index, y=df_bt['Strat_Cum'],
+    x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
     line=dict(color='#10B981', width=2)
 ))
 fig_line.add_trace(go.Scatter(
-    x=df_bt.index, y=df_bt['SPY_Cum'],
+    x=sub_bt.index, y=sub_bt['SPY_Cum'],
     mode='lines', name='買入持有 S&P 500 (Buy & Hold SPY)',
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
 
-# 3. 優化 Y 軸刻度格式 (以標準金額格式化)
 fig_line.update_layout(
     yaxis_type="log",
     yaxis=dict(
-        tickformat="$~s",  # 自動轉換為 $100, $1k, $5k 等清晰金額表示
+        tickformat="$~s",
         gridcolor='#334155'
     ),
     xaxis=dict(showgrid=False),
@@ -297,36 +338,37 @@ fig_line.update_layout(
 st.plotly_chart(fig_line, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 6. 策略核心 KPI 對比表
+# 7. 選定區間之核心 KPI 指標計算
 # -----------------------------------------------------------------------------
-st.markdown("### 策略核心績效指標對比表 (KPI Metrics)")
+st.markdown("### 選定時間區間核心績效指標 (Selected Range KPI Metrics)")
 
 def calc_kpis(ret_series):
     cum = (1 + ret_series).cumprod()
     n_years = len(ret_series) / 12.0
-    cagr = (cum.iloc[-1]) ** (1 / n_years) - 1
+    cagr = (cum.iloc[-1]) ** (1 / n_years) - 1 if n_years > 0 else 0
     vol = ret_series.std() * np.sqrt(12)
     sharpe = cagr / vol if vol != 0 else 0
     dd = cum / cum.cummax() - 1
     mdd = dd.min()
     return cagr*100, vol*100, mdd*100, sharpe
 
-s_cagr, s_vol, s_mdd, s_sharpe = calc_kpis(df_bt['Strat_Ret'])
-b_cagr, b_vol, b_mdd, b_sharpe = calc_kpis(df_bt['SPY_Ret'])
+s_cagr, s_vol, s_mdd, s_sharpe = calc_kpis(sub_bt['Strat_Ret'])
+b_cagr, b_vol, b_mdd, b_sharpe = calc_kpis(sub_bt['SPY_Ret'])
 
 kpi_data = [
     {
         '投資策略名稱 (Strategy)': '適應性宏觀體制策略 (Adaptive Macro Strategy)',
-        '年化報酬率 (CAGR)': f"+{s_cagr:.2f}%",
+        '區間年化報酬率 (CAGR)': f"+{s_cagr:.2f}%",
         '年化波動度 (Volatility)': f"{s_vol:.2f}%",
-        '最大回撤 (Max Drawdown)': f"{s_mdd:.2f}%",
+        '區間最大回撤 (Max Drawdown)': f"{s_mdd:.2f}%",
         '夏普比率 (Sharpe Ratio)': f"{s_sharpe:.2f}"
     },
     {
         '投資策略名稱 (Strategy)': '買入持有 S&P 500 (Buy & Hold SPY)',
-        '年化報酬率 (CAGR)': f"+{b_cagr:.2f}%",
+        '區間年化報酬率 (CAGR)': f"+{b_cagr:.2f}%",
         '年化波動度 (Volatility)': f"{b_vol:.2f}%",
-        '最大回撤 (Max Drawdown)': f"{b_mdd:.2f}%",
+        '區間最大回撤 (Max Drawdown)': f"{b_mdd:.2f}%",
+        '區間最大回撤 (Max Drawdown)': f"{b_mdd:.2f}%",
         '夏普比率 (Sharpe Ratio)': f"{b_sharpe:.2f}"
     }
 ]
