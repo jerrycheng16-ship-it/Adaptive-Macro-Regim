@@ -22,14 +22,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 REGIME_CONFIG = {
-    'Expansion':  {'minScore': 0.40, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
+    'Expansion':  {'minScore': 0.30, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
     'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
-    'Slowdown':   {'minScore':-0.40, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
+    'Slowdown':   {'minScore':-0.30, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
     'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
 }
 
 # -----------------------------------------------------------------------------
-# 2. 論文優化版：Z-Score 標準化 + 滾動 IC + 多資產避險引擎
+# 2. 論文優化版：Z-Score 標準化 + 權重平滑 + 多資產避險引擎
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
 def load_optimized_backtest():
@@ -59,7 +59,7 @@ def load_optimized_backtest():
     
     raw_signals = pd.DataFrame({'Growth': raw_growth, 'Credit': raw_credit, 'Rates': raw_rates}).dropna()
     
-    # 2. 關鍵優化：對因子進行 36 個月滾動 Z-Score 標準化 (Normalize to Z-scores)
+    # 2. 36 個月滾動 Z-Score 標準化 (Normalize to Z-scores)
     z_signals = pd.DataFrame(index=raw_signals.index)
     for col in raw_signals.columns:
         mean = raw_signals[col].rolling(36).mean()
@@ -68,14 +68,14 @@ def load_optimized_backtest():
         
     z_signals = z_signals.dropna()
     
-    # 3. 計算 12 個月滾動 IC 適應性權重
+    # 3. 計算 12 個月滾動 IC 適應性權重 (加入 0.1 基礎權重避免極端歸零)
     fwd_ret = returns['Equity'].reindex(z_signals.index).shift(-1)
     rolling_ic = pd.DataFrame(index=z_signals.index)
     for col in z_signals.columns:
         rolling_ic[col] = z_signals[col].rolling(12).corr(fwd_ret)
         
-    weights = rolling_ic.map(lambda x: max(x, 0) if pd.notnull(x) else 0)
-    weight_sum = weights.sum(axis=1).replace(0, 1)
+    weights = rolling_ic.map(lambda x: max(x, 0) + 0.1 if pd.notnull(x) else 0.1)
+    weight_sum = weights.sum(axis=1)
     weights = weights.div(weight_sum, axis=0)
     
     # 加權合成 Adaptive Macro Score
@@ -151,7 +151,8 @@ with col_btn1:
             ---
             **⚙️ 本版優化核心機制:**
             1. **36M 滾動 Z-Score 標準化：** 將代理因子進行標準化，避免指標尺度差異造成體制判定偏誤。
-            2. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息週期的資本利得。
+            2. **權重平滑機制 (Smoothing Epsilon)：** 保留基礎權重，防止因子無謂失效時分數停滯於零。
+            3. **TLT 長債避險：** 在放緩與收縮期配置長債，捕捉降息週期的資本利得。
             """)
         show_paper_info()
 
@@ -161,10 +162,10 @@ with col_btn2:
         def show_strat_info():
             st.markdown("""
             **📊 優化版資產配置矩陣:**
-            * **Expansion (> +0.40):** 100% SPY
-            * **Recovery (0.00 ~ +0.40):** 80% SPY / 20% Cash
-            * **Slowdown (-0.40 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash
-            * **Contraction (< -0.40):** 10% SPY / 60% TLT / 30% Cash
+            * **Expansion (> +0.30):** 100% SPY
+            * **Recovery (0.00 ~ +0.30):** 80% SPY / 20% Cash
+            * **Slowdown (-0.30 ~ 0.00):** 50% SPY / 30% TLT / 20% Cash
+            * **Contraction (< -0.30):** 10% SPY / 60% TLT / 30% Cash
             """)
         show_strat_info()
 
