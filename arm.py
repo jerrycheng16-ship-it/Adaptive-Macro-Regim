@@ -22,10 +22,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 REGIME_CONFIG = {
-    'Expansion':  {'minScore': 0.30, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'bgColor': 'rgba(16, 185, 129, 0.15)', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
-    'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'bgColor': 'rgba(59, 130, 246, 0.15)',  'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
-    'Slowdown':   {'minScore':-0.30, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'bgColor': 'rgba(245, 158, 11, 0.18)',  'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
-    'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'bgColor': 'rgba(239, 68, 68, 0.22)',  'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
+    'Expansion':  {'minScore': 0.30, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'bgColor': 'rgba(16, 185, 129, 0.20)', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
+    'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'bgColor': 'rgba(59, 130, 246, 0.20)',  'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
+    'Slowdown':   {'minScore':-0.30, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'bgColor': 'rgba(245, 158, 11, 0.22)',  'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
+    'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'bgColor': 'rgba(239, 68, 68, 0.25)',  'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
 }
 
 # -----------------------------------------------------------------------------
@@ -261,7 +261,7 @@ sub_bt['SPY_Cum'] = (1 + sub_bt['SPY_Ret']).cumprod() * 100
 sub_bt['Strat_Cum'] = (1 + sub_bt['Strat_Ret']).cumprod() * 100
 
 # -----------------------------------------------------------------------------
-# 6. 回測表格與動態圖表
+# 6. 回測表格與動態圖表 (含背景色帶 Legend 圖例)
 # -----------------------------------------------------------------------------
 st.markdown(f"### `{start_date_sel.strftime('%Y-%m')}` 至 `{end_date_sel.strftime('%Y-%m')}` 體制統計與月報酬率")
 
@@ -290,6 +290,7 @@ st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Reg
 
 fig_line = go.Figure()
 
+# 1. 繪製背景體制色帶
 current_reg = None
 start_d = None
 
@@ -314,10 +315,21 @@ if current_reg is not None:
         opacity=1.0, layer="below", line_width=0
     )
 
+# 2. 手動在圖表中加入四大體制的背景顏色對應圖例 (Legend Traces)
+for key, c in REGIME_CONFIG.items():
+    fig_line.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=12, color=c['color'], symbol='square'),
+        name=f"色帶: {c['name']}",
+        showlegend=True
+    ))
+
+# 3. 繪製策略與基準之淨值折線
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
-    line=dict(color='#10B981', width=2)
+    line=dict(color='#10B981', width=2.5)
 ))
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['SPY_Cum'],
@@ -336,7 +348,14 @@ fig_line.update_layout(
     plot_bgcolor='rgba(0,0,0,0)',
     font=dict(color='#94A3B8'),
     margin=dict(t=20, b=20, l=10, r=10),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+        font=dict(size=11)
+    )
 )
 
 st.plotly_chart(fig_line, use_container_width=True)
