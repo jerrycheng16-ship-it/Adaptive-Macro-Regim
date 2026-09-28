@@ -35,7 +35,7 @@
       <div class="flex items-center gap-3">
         <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white">Adaptive Macro Regimes</h1>
         <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-accent/20 text-brand-accent border border-brand-accent/30">
-          v6.0 Fix Edition
+          v6.1 HYG/IEF Updated
         </span>
       </div>
       <p class="text-sm text-slate-400 mt-1">Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)</p>
@@ -45,7 +45,7 @@
     <div class="flex items-center gap-3">
       <button onclick="openModal('paperModal')" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-brand-accent border border-slate-700 flex items-center gap-1.5 transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-        論文論文出處與數據說明
+        論文出處與數據說明
       </button>
 
       <button onclick="openModal('strategyModal')" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-brand-accent/20 hover:bg-brand-accent/30 text-brand-accent border border-brand-accent/40 flex items-center gap-1.5 transition-colors">
@@ -80,7 +80,7 @@
 
         <div class="space-y-1.5">
           <div class="flex justify-between text-xs">
-            <span class="text-slate-300">信用利差代理 (HYG/TLT 強弱)</span>
+            <span class="text-slate-300">信用利差代理 (HYG/IEF 強弱)</span>
             <span id="credit-val" class="font-mono text-brand-accent">+0.20%</span>
           </div>
           <input type="range" id="input-credit" min="-2.0" max="2.0" step="0.05" value="0.20" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-accent">
@@ -247,7 +247,7 @@
           <h4 class="font-bold text-white text-sm">⚙️ 左上角三個代理數據如何計算出來？</h4>
           <div class="p-3 bg-slate-900/50 rounded border border-slate-800 space-y-2 font-mono">
             <div><strong>1. 經濟成長/風險偏好 (Growth / Momentum):</strong><br><span class="text-slate-400">計算 S&P 500 (SPY) 過去 6 個月累積報酬率。正值代表經濟景氣擴張且市場風險偏好高。</span></div>
-            <div><strong>2. 信用利差偏好 (Credit Spread Proxy):</strong><br><span class="text-slate-400">計算高收益債 (HYG) 對長天期國債 (TLT) 的相對強度變化 (HYG/TLT 6M Change)。正值代表市場信用風險溢價收窄、企業融資環境良好。</span></div>
+            <div><strong>2. 信用利差偏好 (Credit Spread Proxy):</strong><br><span class="text-slate-400">計算高收益債 (HYG) 對 7-10年期中天期國債 (IEF) 的相對強度變化 (HYG/IEF 6M Change)。選用 IEF 存續期間更匹配 HYG，能有效隔離長端殖利率曲線波動，提供更純粹的信用風險溢價訊號。</span></div>
             <div><strong>3. 利率/通膨趨勢 (Rates Signal):</strong><br><span class="text-slate-400">計算 20 年期美債 (TLT) 過去 6 個月價格動能。債券價格下跌通常反映通膨加溫與央行升息預期。</span></div>
           </div>
         </div>
@@ -309,7 +309,7 @@
               <tr>
                 <td class="p-2 text-brand-warning font-bold">-0.20 ~ 0.00</td>
                 <td class="p-2 text-brand-warning font-bold">Slowdown (放緩)</td>
-                <td class="p-2">【分批減码】成長趨緩，提高現金</td>
+                <td class="p-2">【分批減碼】成長趨緩，提高現金</td>
                 <td class="p-2 text-right text-brand-warning font-bold">40%</td>
                 <td class="p-2 text-right">60%</td>
               </tr>
