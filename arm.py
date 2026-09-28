@@ -22,10 +22,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 REGIME_CONFIG = {
-    'Expansion':  {'minScore': 0.30, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
-    'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
-    'Slowdown':   {'minScore':-0.30, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
-    'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
+    'Expansion':  {'minScore': 0.30, 'name': '擴張期 (Expansion)',  'color': '#10B981', 'bgColor': 'rgba(16, 185, 129, 0.15)', 'eqW': 1.00, 'tltW': 0.00, 'cashW': 0.00},
+    'Recovery':   {'minScore': 0.00, 'name': '復甦期 (Recovery)',   'color': '#3B82F6', 'bgColor': 'rgba(59, 130, 246, 0.15)',  'eqW': 0.80, 'tltW': 0.00, 'cashW': 0.20},
+    'Slowdown':   {'minScore':-0.30, 'name': '放緩期 (Slowdown)',   'color': '#F59E0B', 'bgColor': 'rgba(245, 158, 11, 0.18)',  'eqW': 0.50, 'tltW': 0.30, 'cashW': 0.20},
+    'Contraction':{'minScore':-3.00, 'name': '收縮期 (Contraction)', 'color': '#EF4444', 'bgColor': 'rgba(239, 68, 68, 0.22)',  'eqW': 0.10, 'tltW': 0.60, 'cashW': 0.30}
 }
 
 # -----------------------------------------------------------------------------
@@ -59,7 +59,7 @@ def load_optimized_backtest():
     
     raw_signals = pd.DataFrame({'Growth': raw_growth, 'Credit': raw_credit, 'Rates': raw_rates}).dropna()
     
-    # 2. 36 個月滾動 Z-Score 標準化 (Normalize to Z-scores)
+    # 2. 36 個月滾動 Z-Score 標準化
     z_signals = pd.DataFrame(index=raw_signals.index)
     for col in raw_signals.columns:
         mean = raw_signals[col].rolling(36).mean()
@@ -68,7 +68,7 @@ def load_optimized_backtest():
         
     z_signals = z_signals.dropna()
     
-    # 3. 計算 12 個月滾動 IC 適應性權重 (加入 0.1 基礎權重避免極端歸零)
+    # 3. 計算 12 個月滾動 IC 適應性權重
     fwd_ret = returns['Equity'].reindex(z_signals.index).shift(-1)
     rolling_ic = pd.DataFrame(index=z_signals.index)
     for col in z_signals.columns:
@@ -78,7 +78,6 @@ def load_optimized_backtest():
     weight_sum = weights.sum(axis=1)
     weights = weights.div(weight_sum, axis=0)
     
-    # 加權合成 Adaptive Macro Score
     macro_score = (z_signals * weights).sum(axis=1).dropna()
     
     # 4. 體制劃分與部位對應
@@ -90,7 +89,6 @@ def load_optimized_backtest():
         
     regimes = macro_score.map(get_regime_info)
     
-    # 位移一期 (Shift 1) 避免未來資訊偏誤
     alloc_eq = regimes.map(lambda r: REGIME_CONFIG[r]['eqW']).shift(1)
     alloc_tlt = regimes.map(lambda r: REGIME_CONFIG[r]['tltW']).shift(1)
     alloc_cash = regimes.map(lambda r: REGIME_CONFIG[r]['cashW']).shift(1)
@@ -100,7 +98,6 @@ def load_optimized_backtest():
     ret_tlt = returns['LongTreasury'].loc[valid_idx]
     ret_cash = returns['Cash'].loc[valid_idx]
     
-    # 計算策略複合月報酬率
     strat_ret = (alloc_eq.loc[valid_idx] * ret_eq) + \
                 (alloc_tlt.loc[valid_idx] * ret_tlt) + \
                 (alloc_cash.loc[valid_idx] * ret_cash)
@@ -240,9 +237,37 @@ for key, c in REGIME_CONFIG.items():
 
 st.table(pd.DataFrame(stats_list))
 
-st.markdown("### 歷史資產累積報酬率曲線 (Cumulative Equity Curves)")
+# --- 圖表與背景體制色帶區塊 ---
+st.markdown("### 歷史資產累積報酬率曲線與背景體制色帶 (Cumulative Equity Curves with Regime Bands)")
 
 fig_line = go.Figure()
+
+# 1. 繪製背景體制色帶 (Merging Continuous Regimes)
+current_regime = None
+start_date = None
+
+for i in range(len(df_bt)):
+    date = df_bt.index[i]
+    reg = df_bt['Regime'].iloc[i]
+    
+    if reg != current_regime:
+        if current_regime is not None:
+            fig_line.add_vrect(
+                x0=start_date, x1=date,
+                fillcolor=REGIME_CONFIG[current_regime]['bgColor'],
+                opacity=1.0, layer="below", line_width=0
+            )
+        current_regime = reg
+        start_date = date
+
+if current_regime is not None:
+    fig_line.add_vrect(
+        x0=start_date, x1=df_bt.index[-1],
+        fillcolor=REGIME_CONFIG[current_regime]['bgColor'],
+        opacity=1.0, layer="below", line_width=0
+    )
+
+# 2. 繪製淨值折線
 fig_line.add_trace(go.Scatter(
     x=df_bt.index, y=df_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
@@ -253,18 +278,27 @@ fig_line.add_trace(go.Scatter(
     mode='lines', name='買入持有 S&P 500 (Buy & Hold SPY)',
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
+
+# 3. 優化 Y 軸刻度格式 (以標準金額格式化)
 fig_line.update_layout(
     yaxis_type="log",
+    yaxis=dict(
+        tickformat="$~s",  # 自動轉換為 $100, $1k, $5k 等清晰金額表示
+        gridcolor='#334155'
+    ),
+    xaxis=dict(showgrid=False),
     paper_bgcolor='rgba(0,0,0,0)',
     plot_bgcolor='rgba(0,0,0,0)',
     font=dict(color='#94A3B8'),
-    xaxis=dict(showgrid=False),
-    yaxis=dict(showgrid=True, gridcolor='#334155'),
     margin=dict(t=20, b=20, l=10, r=10),
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 )
+
 st.plotly_chart(fig_line, use_container_width=True)
 
+# -----------------------------------------------------------------------------
+# 6. 策略核心 KPI 對比表
+# -----------------------------------------------------------------------------
 st.markdown("### 策略核心績效指標對比表 (KPI Metrics)")
 
 def calc_kpis(ret_series):
