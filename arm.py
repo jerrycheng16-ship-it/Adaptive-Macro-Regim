@@ -29,7 +29,7 @@ REGIME_CONFIG = {
 }
 
 # -----------------------------------------------------------------------------
-# 2. 原始市場數據快取 (免去重複下載)
+# 2. 原始市場數據快取 (從 1985 年下載預留足夠暖機視窗)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=86400)
 def load_raw_market_data():
@@ -41,7 +41,7 @@ def load_raw_market_data():
         'Cash': 'VFISX'         # 短期國債 (BIL 代理)
     }
     
-    raw_df = yf.download(list(tickers.values()), start="1987-01-01", auto_adjust=True)
+    raw_df = yf.download(list(tickers.values()), start="1985-01-01", auto_adjust=True)
     
     if isinstance(raw_df.columns, pd.MultiIndex):
         df = raw_df['Close'] if 'Close' in raw_df.columns.levels[0] else raw_df.iloc[:, :len(tickers)]
@@ -52,7 +52,6 @@ def load_raw_market_data():
     monthly_data = df.resample('ME').last()
     returns = monthly_data.pct_change().dropna()
     
-    # 原始代理因子 (6M Momentum)
     raw_growth = monthly_data['Equity'].pct_change(6)
     raw_credit = (monthly_data['HighYield'] / monthly_data['MidTreasury']).pct_change(6)
     raw_rates = monthly_data['LongTreasury'].pct_change(6)
@@ -61,10 +60,10 @@ def load_raw_market_data():
     return raw_signals, returns
 
 # -----------------------------------------------------------------------------
-# 3. 可調參數核心運算引擎 (Dynamic Parameter Engine)
+# 3. 可調參數核心運算引擎 (固定 1993-01 起點，解決 Benchmark 移動問題)
 # -----------------------------------------------------------------------------
 def run_macro_model(raw_signals, returns, z_window, ic_window):
-    # 1. 可調視窗 Z-Score 標準化
+    # 1. Z-Score 標準化
     z_signals = pd.DataFrame(index=raw_signals.index)
     for col in raw_signals.columns:
         mean = raw_signals[col].rolling(z_window).mean()
@@ -73,7 +72,7 @@ def run_macro_model(raw_signals, returns, z_window, ic_window):
         
     z_signals = z_signals.dropna()
     
-    # 2. 可調視窗滾動 IC 適應性權重
+    # 2. 滾動 IC 適應性權重
     fwd_ret = returns['Equity'].reindex(z_signals.index).shift(-1)
     rolling_ic = pd.DataFrame(index=z_signals.index)
     for col in z_signals.columns:
@@ -98,7 +97,10 @@ def run_macro_model(raw_signals, returns, z_window, ic_window):
     alloc_tlt = regimes.map(lambda r: REGIME_CONFIG[r]['tltW']).shift(1)
     alloc_cash = regimes.map(lambda r: REGIME_CONFIG[r]['cashW']).shift(1)
     
-    valid_idx = alloc_eq.dropna().index
+    # 【關鍵修復】：統一將回測起始點固定為 1993-01-01，消除起點偏移造成的 Benchmark 計算誤差
+    fixed_start_date = pd.to_datetime('1993-01-01')
+    valid_idx = alloc_eq.dropna().loc[fixed_start_date:].index
+    
     ret_eq = returns['Equity'].loc[valid_idx]
     ret_tlt = returns['LongTreasury'].loc[valid_idx]
     ret_cash = returns['Cash'].loc[valid_idx]
@@ -197,7 +199,6 @@ with col_ic:
         help="決定統計因子與未來股市相關性的視窗。視窗越短，權重調整越靈敏。預設 12 個月。"
     )
 
-# 根據選擇的參數動態重算模型
 df_bt, df_details = run_macro_model(raw_signals, returns, z_win_sel, ic_win_sel)
 
 st.divider()
@@ -320,7 +321,6 @@ st.markdown("""
 
 fig_line = go.Figure()
 
-# 1. 折線圖
 fig_line.add_trace(go.Scatter(
     x=sub_bt.index, y=sub_bt['Strat_Cum'],
     mode='lines', name='適應性宏觀體制策略 (Adaptive Strategy)',
@@ -332,7 +332,6 @@ fig_line.add_trace(go.Scatter(
     line=dict(color='#94A3B8', width=1.5, dash='dash')
 ))
 
-# 2. 背景色帶
 current_reg = None
 start_d = None
 
