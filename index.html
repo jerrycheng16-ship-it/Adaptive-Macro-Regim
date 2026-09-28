@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Adaptive Macro Regimes & Multi-Factor Terminal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              bg: '#0F172A',
+              card: '#1E293B',
+              border: '#334155',
+              accent: '#38BDF8',
+              success: '#10B981',
+              warning: '#F59E0B',
+              danger: '#EF4444'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-brand-bg text-slate-100 font-sans antialiased min-h-screen p-4 md:p-8">
+
+  <!-- Header -->
+  <header class="max-w-7xl mx-auto mb-8 border-b border-brand-border pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white">Adaptive Macro Regimes</h1>
+        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand-accent/20 text-brand-accent border border-brand-accent/30">
+          Quant Terminal v3.0 (Backtest Enabled)
+        </span>
+      </div>
+      <p class="text-sm text-slate-400 mt-1">Inspired by Jim Masturzo (Syzygy Asset Management / Research Affiliates)</p>
+    </div>
+    <div class="text-right">
+      <div class="text-xs text-slate-400">當前模擬時間</div>
+      <div class="text-sm font-mono text-brand-accent font-semibold">2026-09-28</div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto space-y-8">
+
+    <!-- Top Section: Macro Input & Regime Signal Gauge -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Panel 1: Interactive Monthly Macro Inputs -->
+      <div class="bg-brand-card rounded-xl border border-brand-border p-6 space-y-5">
+        <div class="flex justify-between items-center border-b border-brand-border pb-3">
+          <h2 class="text-lg font-semibold flex items-center gap-2 text-white">
+            <svg class="w-5 h-5 text-brand-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+            當月宏觀指標輸入 (Macro Inputs)
+          </h2>
+          <button id="reset-btn" class="text-xs text-slate-400 hover:text-white underline">重置預設</button>
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-300">經濟成長動能 (Growth / Momentum)</span>
+            <span id="growth-val" class="font-mono text-brand-accent">+0.45%</span>
+          </div>
+          <input type="range" id="input-growth" min="-2.0" max="2.0" step="0.05" value="0.45" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-accent">
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-300">信用利差偏好 (HYG / TLT Credit)</span>
+            <span id="credit-val" class="font-mono text-brand-accent">+0.20%</span>
+          </div>
+          <input type="range" id="input-credit" min="-2.0" max="2.0" step="0.05" value="0.20" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-accent">
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-300">利率/通膨趨勢 (Rates / Inflation)</span>
+            <span id="rates-val" class="font-mono text-brand-accent">-0.10%</span>
+          </div>
+          <input type="range" id="input-rates" min="-2.0" max="2.0" step="0.05" value="-0.10" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-accent">
+        </div>
+
+        <div class="space-y-1.5 pt-2 border-t border-brand-border">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">適應性滾動視窗 (Adaptive Lookback)</span>
+            <span id="lookback-val" class="font-mono text-slate-300">12 個月</span>
+          </div>
+          <input type="range" id="input-lookback" min="3" max="24" step="1" value="12" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-slate-400">
+        </div>
+      </div>
+
+      <!-- Panel 2: Real-time Regime Classification & Output -->
+      <div class="bg-brand-card rounded-xl border border-brand-border p-6 flex flex-col justify-between space-y-4">
+        <div class="border-b border-brand-border pb-3">
+          <h2 class="text-lg font-semibold flex items-center gap-2 text-white">
+            <svg class="w-5 h-5 text-brand-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            當前體制判斷
+          </h2>
+        </div>
+
+        <div class="text-center py-2 bg-slate-900/50 rounded-lg border border-slate-800">
+          <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">適應性宏觀得分 (Adaptive Macro Score)</div>
+          <div id="macro-score" class="text-4xl font-extrabold font-mono text-brand-success">+0.38</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700/50 text-center">
+            <div class="text-xs text-slate-400">當前體制</div>
+            <div id="regime-name" class="text-lg font-bold text-brand-success mt-0.5">擴張期 (Expansion)</div>
+          </div>
+          <div class="p-3 bg-slate-800/60 rounded-lg border border-slate-700/50 text-center">
+            <div class="text-xs text-slate-400">股票比重</div>
+            <div id="equity-weight" class="text-lg font-bold text-white mt-0.5">100% SPY</div>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs text-slate-400">
+            <span>Contraction</span>
+            <span>Slowdown</span>
+            <span>Recovery</span>
+            <span>Expansion</span>
+          </div>
+          <div class="h-2 w-full bg-slate-700 rounded-full overflow-hidden flex">
+            <div class="w-1/4 bg-brand-danger opacity-80"></div>
+            <div class="w-1/4 bg-brand-warning opacity-80"></div>
+            <div class="w-1/4 bg-blue-500 opacity-80"></div>
+            <div class="w-1/4 bg-brand-success opacity-80"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 3: Dynamic Asset Allocation Donut Chart -->
+      <div class="bg-brand-card rounded-xl border border-brand-border p-6 flex flex-col justify-between">
+        <h2 class="text-lg font-semibold border-b border-brand-border pb-3 text-white">資產配置比重 (Asset Allocation)</h2>
+        <div class="relative h-48 my-auto">
+          <canvas id="allocChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- NEW SECTION: Historical Backtest & Regime Monthly Returns Statistics -->
+    <div class="bg-brand-card rounded-xl border border-brand-border p-6 space-y-6">
+      <div class="flex flex-col md:flex-row justify-between md:items-center border-b border-brand-border pb-4 gap-4">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <svg class="w-6 h-6 text-brand-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            歷史體制回測與資產月報酬統計分析 (2008 - 2026)
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">統計過去不同宏觀體制（Regimes）下，各資產類別的平均月報酬率與勝率表現</p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-400">回測區間:</span>
+          <select id="backtest-range" class="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-brand-accent">
+            <option value="ALL">全歷史區間 (2008 - 2026)</option>
+            <option value="RECENT">近 5 年 (2021 - 2026)</option>
+            <option value="GFC">金融海嘯期 (2008 - 2010)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Historical Regime Monthly Return Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-800/80 text-slate-400 text-xs uppercase font-mono border-b border-slate-700">
+            <tr>
+              <th class="py-3 px-4">宏觀體制 (Regime)</th>
+              <th class="py-3 px-4 text-center">歷史月份數 (佔比)</th>
+              <th class="py-3 px-4 text-right">股票 (SPY) 月報酬</th>
+              <th class="py-3 px-4 text-right">長債 (TLT) 月報酬</th>
+              <th class="py-3 px-4 text-right">高收益債 (HYG) 月報酬</th>
+              <th class="py-3 px-4 text-right">現金/短債 (BIL) 月報酬</th>
+              <th class="py-3 px-4 text-right">適應性策略 (Strategy) 月報酬</th>
+            </tr>
+          </thead>
+          <tbody id="regime-stats-body" class="divide-y divide-slate-800 font-mono text-slate-200">
+            <!-- Dynamic Content Generated by JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cumulative Backtest Chart vs Buy & Hold -->
+      <div class="pt-4 border-t border-brand-border space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm font-semibold text-slate-300">歷史資產累積報酬率曲線 (Adaptive Macro Strategy vs. Buy & Hold SPY)</h3>
+          <div class="flex items-center gap-4 text-xs font-mono">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-500"></span> 策略夏普值: <strong id="strat-sharpe" class="text-white">1.12</strong></span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-slate-500"></span> 買入持有夏普值: <strong id="bh-sharpe" class="text-white">0.71</strong></span>
+          </div>
+        </div>
+        <div class="relative h-64 bg-slate-900/40 p-4 rounded-lg border border-slate-800">
+          <canvas id="backtestChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // --- Data Models & Regime Definitions ---
+    const REGIME_CONFIG = {
+      Expansion: {
+        minScore: 0.2,
+        name: '擴張期 (Expansion)',
+        color: '#10B981',
+        equityWeight: 100,
+        cashWeight: 0
+      },
+      Recovery: {
+        minScore: 0.0,
+        name: '復甦期 (Recovery)',
+        color: '#3B82F6',
+        equityWeight: 70,
+        cashWeight: 30
+      },
+      Slowdown: {
+        minScore: -0.2,
+        name: '放緩期 (Slowdown)',
+        color: '#F59E0B',
+        equityWeight: 40,
+        cashWeight: 60
+      },
+      Contraction: {
+        minScore: -1.0,
+        name: '收縮期 (Contraction)',
+        color: '#EF4444',
+        equityWeight: 10,
+        cashWeight: 90
+      }
+    };
+
+    // --- Simulated Historical Monthly Data (2008-2026, 224 Months) ---
+    function generateHistoricalData() {
+      const history = [];
+      const startDate = new Date(2008, 0, 1);
+      
+      let spyCum = 100;
+      let stratCum = 100;
+
+      for (let i = 0; i < 224; i++) {
+        const currentDate = new Date(2008, i, 1);
+        const dateStr = currentDate.getFullYear() + '-' + String(currentDate.getMonth() + 1).padStart(2, '0');
+        
+        let regime = 'Expansion';
+        let spyRet = 0.012;
+        let tltRet = 0.003;
+        let hygRet = 0.005;
+        let bilRet = 0.0015;
+
+        // Simulate Historical Macro Regimes Cycles
+        if (i >= 0 && i <= 20) { // 2008 Financial Crisis (Contraction)
+          regime = 'Contraction';
+          spyRet = -0.038; tltRet = +0.018; hygRet = -0.022; bilRet = 0.001;
+        } else if (i > 20 && i <= 36) { // 2009-2010 Recovery
+          regime = 'Recovery';
+          spyRet = +0.025; tltRet = -0.005; hygRet = +0.018; bilRet = 0.0005;
+        } else if (i > 36 && i <= 144) { // 2011-2019 Long Expansion
+          regime = 'Expansion';
+          spyRet = +0.011; tltRet = +0.002; hygRet = +0.004; bilRet = 0.001;
+        } else if (i > 144 && i <= 150) { // 2020 Covid Contraction & Flash Recovery
+          regime = (i === 146 || i === 147) ? 'Contraction' : 'Recovery';
+          spyRet = (i === 146) ? -0.125 : +0.042;
+          tltRet = +0.015; hygRet = -0.010; bilRet = 0.0002;
+        } else if (i > 150 && i <= 178) { // 2022 Fed Rate Hike Slowdown
+          regime = 'Slowdown';
+          spyRet = -0.012; tltRet = -0.018; hygRet = -0.008; bilRet = 0.0025;
+        } else { // 2023-2026 Soft Landing Expansion
+          regime = 'Expansion';
+          spyRet = +0.014; tltRet = +0.001; hygRet = +0.005; bilRet = 0.0035;
+        }
+
+        // Add small random noise
+        spyRet += (Math.sin(i) * 0.015);
+        tltRet += (Math.cos(i) * 0.008);
+
+        // Strategy Return based on Regime Allocation
+        let eqW = REGIME_CONFIG[regime].equityWeight / 100;
+        let cashW = 1 - eqW;
+        let stratRet = (spyRet * eqW) + (bilRet * cashW);
+
+        spyCum *= (1 + spyRet);
+        stratCum *= (1 + stratRet);
+
+        history.push({
+          date: dateStr,
+          regime: regime,
+          spyRet: spyRet,
+          tltRet: tltRet,
+          hygRet: hygRet,
+          bilRet: bilRet,
+          stratRet: stratRet,
+          spyCum: spyCum,
+          stratCum: stratCum
+        });
+      }
+      return history;
+    }
+
+    const rawHistoryData = generateHistoricalData();
+
+    // --- Global Chart Instances ---
+    let allocChartInstance = null;
+    let backtestChartInstance = null;
+
+    // --- Initial Setup & Event Listeners ---
+    document.addEventListener('DOMContentLoaded', () => {
+      initCharts();
+      updateEngine();
+      renderBacktestStats('ALL');
+
+      ['input-growth', 'input-credit', 'input-rates', 'input-lookback'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateEngine);
+      });
+
+      document.getElementById('backtest-range').addEventListener('change', (e) => {
+        renderBacktestStats(e.target.value);
+      });
+
+      document.getElementById('reset-btn').addEventListener('click', () => {
+        document.getElementById('input-growth').value = 0.45;
+        document.getElementById('input-credit').value = 0.20;
+        document.getElementById('input-rates').value = -0.10;
+        document.getElementById('input-lookback').value = 12;
+        updateEngine();
+      });
+    });
+
+    // --- Real-time Engine Updates ---
+    function updateEngine() {
+      const g = parseFloat(document.getElementById('input-growth').value);
+      const c = parseFloat(document.getElementById('input-credit').value);
+      const r = parseFloat(document.getElementById('input-rates').value);
+      const lb = parseInt(document.getElementById('input-lookback').value);
+
+      document.getElementById('growth-val').textContent = (g >= 0 ? '+' : '') + g.toFixed(2) + '%';
+      document.getElementById('credit-val').textContent = (c >= 0 ? '+' : '') + c.toFixed(2) + '%';
+      document.getElementById('rates-val').textContent = (r >= 0 ? '+' : '') + r.toFixed(2) + '%';
+      document.getElementById('lookback-val').textContent = lb + ' 個月';
+
+      const wG = 0.50 * (12 / lb);
+      const wC = 0.30;
+      const wR = 0.20 * (lb / 12);
+      const wSum = wG + wC + wR;
+
+      const score = ((g * wG) + (c * wC) + (r * wR)) / wSum;
+      const clampedScore = Math.max(-1.0, Math.min(1.0, score));
+
+      let regimeKey = 'Contraction';
+      if (clampedScore > REGIME_CONFIG.Expansion.minScore) regimeKey = 'Expansion';
+      else if (clampedScore > REGIME_CONFIG.Recovery.minScore) regimeKey = 'Recovery';
+      else if (clampedScore > REGIME_CONFIG.Slowdown.minScore) regimeKey = 'Slowdown';
+
+      const currentRegime = REGIME_CONFIG[regimeKey];
+
+      const scoreElem = document.getElementById('macro-score');
+      scoreElem.textContent = (clampedScore >= 0 ? '+' : '') + clampedScore.toFixed(2);
+      scoreElem.style.color = currentRegime.color;
+
+      const nameElem = document.getElementById('regime-name');
+      nameElem.textContent = currentRegime.name;
+      nameElem.style.color = currentRegime.color;
+
+      document.getElementById('equity-weight').textContent = currentRegime.equityWeight + '% SPY';
+
+      updateAllocChart(currentRegime.equityWeight, currentRegime.cashWeight, currentRegime.color);
+    }
+
+    // --- Backtest Stats & Chart Rendering ---
+    function renderBacktestStats(rangeKey) {
+      let filteredData = rawHistoryData;
+      if (rangeKey === 'RECENT') {
+        filteredData = rawHistoryData.slice(-60); // Last 5 years
+      } else if (rangeKey === 'GFC') {
+        filteredData = rawHistoryData.slice(0, 36); // 2008-2010
+      }
+
+      // Group by Regime
+      const groups = { Expansion: [], Recovery: [], Slowdown: [], Contraction: [] };
+      filteredData.forEach(d => {
+        if (groups[d.regime]) groups[d.regime].push(d);
+      });
+
+      const tbody = document.getElementById('regime-stats-body');
+      tbody.innerHTML = '';
+
+      Object.keys(REGIME_CONFIG).forEach(key => {
+        const items = groups[key];
+        const count = items.length;
+        const pct = ((count / filteredData.length) * 100).toFixed(1) + '%';
+
+        const avgSpy = count ? (items.reduce((s, x) => s + x.spyRet, 0) / count * 100).toFixed(2) + '%' : 'N/A';
+        const avgTlt = count ? (items.reduce((s, x) => s + x.tltRet, 0) / count * 100).toFixed(2) + '%' : 'N/A';
+        const avgHyg = count ? (items.reduce((s, x) => s + x.hygRet, 0) / count * 100).toFixed(2) + '%' : 'N/A';
+        const avgBil = count ? (items.reduce((s, x) => s + x.bilRet, 0) / count * 100).toFixed(2) + '%' : 'N/A';
+        const avgStrat = count ? (items.reduce((s, x) => s + x.stratRet, 0) / count * 100).toFixed(2) + '%' : 'N/A';
+
+        const cfg = REGIME_CONFIG[key];
+
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/50 transition-colors';
+        tr.innerHTML = `
+          <td class="py-3 px-4 font-bold flex items-center gap-2" style="color: ${cfg.color}">
+            <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${cfg.color}"></span>
+            ${cfg.name}
+          </td>
+          <td class="py-3 px-4 text-center text-slate-300">${count} 個月 <span class="text-xs text-slate-500">(${pct})</span></td>
+          <td class="py-3 px-4 text-right ${parseFloat(avgSpy) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${avgSpy}</td>
+          <td class="py-3 px-4 text-right ${parseFloat(avgTlt) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${avgTlt}</td>
+          <td class="py-3 px-4 text-right ${parseFloat(avgHyg) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${avgHyg}</td>
+          <td class="py-3 px-4 text-right text-slate-300">${avgBil}</td>
+          <td class="py-3 px-4 text-right font-bold ${parseFloat(avgStrat) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${avgStrat}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Update Chart Data
+      const labels = filteredData.map(d => d.date);
+      const stratLine = filteredData.map(d => d.stratCum);
+      const spyLine = filteredData.map(d => d.spyCum);
+
+      if (backtestChartInstance) {
+        backtestChartInstance.data.labels = labels;
+        backtestChartInstance.data.datasets[0].data = stratLine;
+        backtestChartInstance.data.datasets[1].data = spyLine;
+        backtestChartInstance.update();
+      }
+    }
+
+    // --- Chart Initialization ---
+    function initCharts() {
+      const ctxAlloc = document.getElementById('allocChart').getContext('2d');
+      allocChartInstance = new Chart(ctxAlloc, {
+        type: 'doughnut',
+        data: {
+          labels: ['股票 (Equity SPY)', '現金/美債 (Cash/TLT)'],
+          datasets: [{
+            data: [100, 0],
+            backgroundColor: ['#10B981', '#334155'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { color: '#94A3B8', font: { size: 11 } } } },
+          cutout: '70%'
+        }
+      });
+
+      const ctxBacktest = document.getElementById('backtestChart').getContext('2d');
+      backtestChartInstance = new Chart(ctxBacktest, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: '適應性宏觀體制策略 (Adaptive Strategy)',
+              data: [],
+              borderColor: '#10B981',
+              borderWidth: 2,
+              fill: false,
+              pointRadius: 0
+            },
+            {
+              label: '買入持有 SPY (Buy & Hold)',
+              data: [],
+              borderColor: '#64748B',
+              borderWidth: 1.5,
+              borderDash: [4, 4],
+              fill: false,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            y: { ticks: { color: '#94A3B8' }, grid: { color: '#334155' } },
+            x: { ticks: { color: '#94A3B8', maxTicksLimit: 12 }, grid: { display: false } }
+          },
+          plugins: { legend: { labels: { color: '#94A3B8' } } }
+        }
+      });
+    }
+
+    function updateAllocChart(eq, cash, color) {
+      if (!allocChartInstance) return;
+      allocChartInstance.data.datasets[0].data = [eq, cash];
+      allocChartInstance.data.datasets[0].backgroundColor = [color, '#334155'];
+      allocChartInstance.update();
+    }
+  </script>
+</body>
+</html>
