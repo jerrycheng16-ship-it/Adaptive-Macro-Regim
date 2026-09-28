@@ -109,7 +109,9 @@ def load_optimized_backtest():
         'Strat_Ret': strat_ret
     }, index=valid_idx)
     
+    # 建立以 YYYY-MM 為 Key 的詳細字典，確保 100% 避免 KeyError
     monthly_details = pd.DataFrame({
+        'Month_Str': z_signals.index.strftime('%Y-%m'),
         'Macro_Score': macro_score,
         'Growth_Z': z_signals['Growth'],
         'Credit_Z': z_signals['Credit'],
@@ -168,20 +170,21 @@ with col_btn2:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. 指定月份體制動態查詢 (Month Lookup Selector)
+# 4. 指定月份體制動態查詢 (Month Lookup Selector - 已修正 KeyError 索引機制)
 # -----------------------------------------------------------------------------
-all_months = df_details.index.strftime('%Y-%m').tolist()
+all_months = df_details['Month_Str'].tolist()
 
 col_sel1, col_sel2 = st.columns([2, 3])
 with col_sel1:
     selected_month_str = st.selectbox(
         "🔍 選擇查詢月份 (Select Historical Month):",
-        options=all_months[::-1],  # 預設最新的月份在最上面
+        options=all_months[::-1],  # 最新月份在最上面
         index=0
     )
 
-selected_date = pd.to_datetime(selected_month_str)
-m_row = df_details.loc[selected_date]
+# 使用字串安全篩選
+m_row = df_details[df_details['Month_Str'] == selected_month_str].iloc[0]
+
 m_score = m_row['Macro_Score']
 m_g = m_row['Growth_Z']
 m_c = m_row['Credit_Z']
@@ -230,17 +233,13 @@ st.markdown("## 歷史體制動態回測 (Interactive Backtest Engine)")
 min_bdate = df_bt.index.min().date()
 max_bdate = df_bt.index.max().date()
 
-# 區間選擇介面
-col_slider, col_presets = st.columns([2.5, 1.5])
-
-with col_slider:
-    start_date_sel, end_date_sel = st.slider(
-        "📅 調整歷史回測時間區間 (Select Backtest Range):",
-        min_value=min_bdate,
-        max_value=max_bdate,
-        value=(min_bdate, max_bdate),
-        format="YYYY-MM"
-    )
+start_date_sel, end_date_sel = st.slider(
+    "📅 調整歷史回測時間區間 (Select Backtest Range):",
+    min_value=min_bdate,
+    max_value=max_bdate,
+    value=(min_bdate, max_bdate),
+    format="YYYY-MM"
+)
 
 # 根據選擇裁切資料
 sub_bt = df_bt.loc[pd.to_datetime(start_date_sel):pd.to_datetime(end_date_sel)].copy()
@@ -284,7 +283,6 @@ st.markdown("### 累積報酬率曲線與背景體制色帶 (Equity Curves & Reg
 
 fig_line = go.Figure()
 
-# 背景體制區塊
 current_reg = None
 start_d = None
 
@@ -367,7 +365,6 @@ kpi_data = [
         '投資策略名稱 (Strategy)': '買入持有 S&P 500 (Buy & Hold SPY)',
         '區間年化報酬率 (CAGR)': f"+{b_cagr:.2f}%",
         '年化波動度 (Volatility)': f"{b_vol:.2f}%",
-        '區間最大回撤 (Max Drawdown)': f"{b_mdd:.2f}%",
         '區間最大回撤 (Max Drawdown)': f"{b_mdd:.2f}%",
         '夏普比率 (Sharpe Ratio)': f"{b_sharpe:.2f}"
     }
