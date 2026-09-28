@@ -1,82 +1,106 @@
-import streamlit as st
+from flask import Flask, render_template, jsonify, request
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+from datetime import datetime
 
-# 頁面配置
-st.set_page_config(page_title="Adaptive Macro Regimes & SP500", layout="wide")
+app = Flask(__name__, template_folder='.')
 
-st.title("📈 Adaptive Macro Regimes & S&P 500 自動回測與最新投資建議")
-st.caption("自動抓取最新歷史數據 | 計算 Macro Regimes | 每月動態資產配置建議")
-
-# 1. 自動抓取最新歷史數據 (修正後相容新版 yfinance)
-@st.cache_data(ttl=86400) # 快取 24 小時
-def load_data():
-    tickers = ["^GSPC", "^TNX"]
-    raw_data = yf.download(tickers, start="2010-01-01")['Close']
+@app.route('/api/backtest')
+def get_backtest_data():
+    # 抓取真實金融市場數據
+    tickers = ["SPY", "HYG", "IEF", "TLT", "BIL"]
+    raw = yf.download(tickers, start="1990-01-01")['Close']
     
-    # 重新命名欄位
-    raw_data = raw_data.rename(columns={'^GSPC': 'SP500', '^TNX': 'TNX'})
-    df = raw_data.dropna()
-    
-    # 計算月度資料 (ME 代表 Month End)
+    # 處理 missing values 並轉為月度資料
+    df = raw.ffill().bfill()
     monthly = df.resample('ME').last()
-    monthly['SP500_Return'] = monthly['SP500'].pct_change()
-    monthly['TNX_Change'] = monthly['TNX'].diff()
     
-    # 劃分 4 個 Regime
-    monthly['Growth_Signal'] = monthly['SP500_Return'] > 0
-    monthly['Rate_Signal'] = monthly['TNX_Change'] > 0
+    # 1. 計算真實 6 個月代理數據 (6M Rolling Return)
+    monthly['growth_proxy'] = monthly['SPY'].pct_change(6) # SPY 6M 報酬
+    monthly['credit_proxy'] = (monthly['HYG'] / monthly['IEF']).pct_change(6) # HYG/IEF 相對強度
+    monthly['rates_proxy'] = monthly['TLT'].pct_change(6) # TLT 6M 報酬
     
-    def assign_regime(row):
-        if row['Growth_Signal'] and not row['Rate_Signal']:
-            return 'Goldilocks (金髮女孩)'
-        elif row['Growth_Signal'] and row['Rate_Signal']:
-            return 'Reflation (通膨過熱)'
-        elif not row['Growth_Signal'] and row['Rate_Signal']:
-            return 'Stagflation (滯脹)'
-        else:
-            return 'Deflation/Recession (衰退)'
-
-    monthly['Regime'] = monthly.apply(assign_regime, axis=1)
+    # 月報酬率 (計算策略資產變化)
+    monthly['spy_ret'] = monthly['SPY'].pct_change()
+    monthly['bil_ret'] = monthly['BIL'].pct_change().fillna(0.001) # 無 BIL 數據時期以微小正報酬充當短債
+    
     monthly = monthly.dropna()
-    return monthly
+    
+    # 2. 計算 Adaptive Score 與 Regime 判定
+    # 預設 Lookback 12 個月權重
+    wG, wC, wR = 0.50, 0.30, 0.20
+    monthly['macro_score'] = (monthly['growth_proxy']*wG + monthly['credit_proxy']*wC + monthly['rates_proxy']*wR) / (wG+wC+wR)
+    monthly['macro_score'] = monthly['macro_score'].clip(-1.0, 1.0)
+    
+    def get_regime(score):
+        if score > 0.20: return 'Expansion'
+        elif score > 0.00: return 'Recovery'
+        elif score > -0.20: return 'Slowdown'
+        else: return 'Contraction'
+        
+    monthly['regime'] = monthly['macro_score'].apply(get_regime)
+    
+    # 3. 計算策略配置與資產淨值 (Strategy Equity Curve)
+    weights = {'Expansion': 1.0, 'Recovery': 0.7, 'Slowdown': 0.4, 'Contraction': 0.1}
+    monthly['eq_weight'] = monthly['regime'].map(weights)
+    monthly['cash_weight'] = 1 - monthly['eq_weight']
+    
+    monthly['strat_ret'] = (monthly['spy_ret'] * monthly['eq_weight']) + (monthly['bil_ret'] * monthly['cash_weight'])
+    
+    monthly['spy_cum'] = (1 + monthly['spy_ret']).cumprod() * 100
+    monthly['strat_cum'] = (1 + monthly['strat_ret']).cumprod() * 100
+    
+    # 4. 整理歷史資料回傳 JSON
+    history = []
+    for idx, row in monthly.iterrows():
+        history.append({
+            'date': idx.strftime('%Y-%m'),
+            'regime': row['regime'],
+            'spyRet': float(row['spy_ret']),
+            'bilRet': float(row['bil_ret']),
+            'stratRet': float(row['strat_ret']),
+            'spyCum': float(row['spy_cum']),
+            'stratCum': float(row['strat_cum']),
+            'macroScore': float(row['macro_score']),
+            'growthProxy': float(row['growth_proxy']),
+            'creditProxy': float(row['credit_proxy']),
+            'ratesProxy': float(row['rates_proxy'])
+        })
+        
+    # 計算真實 KPI
+    def calc_kpi(returns):
+        ann_ret = (1 + returns.mean())**12 - 1
+        ann_vol = returns.std() * np.sqrt(12)
+        cum = (1 + returns).cumprod()
+        dd = (cum - cum.cummax()) / cum.cummax()
+        mdd = dd.min()
+        sharpe = ann_ret / ann_vol if ann_vol != 0 else 0
+        return ann_ret, ann_vol, mdd, sharpe
 
-data = load_data()
+    strat_cagr, strat_vol, strat_mdd, strat_sharpe = calc_kpi(monthly['strat_ret'])
+    spy_cagr, spy_vol, spy_mdd, spy_sharpe = calc_kpi(monthly['spy_ret'])
 
-# 2. 取得最新月底的 Regime 與投資建議
-latest_month = data.index[-1].strftime('%Y-%m')
-latest_regime = data['Regime'].iloc[-1]
-
-st.subheader(f"🗓️ 最新總經狀態評估 ({latest_month})")
-
-col1, col2 = st.columns(2)
-with col1:
-    st.metric(label="當前市場 Regime", value=latest_regime)
-
-with col2:
-    advice_map = {
-        'Goldilocks (金髮女孩)': "💡 **投資建議**：加碼股票 (特別是科技股與成長股)、加碼信用債。適度減碼現金。",
-        'Reflation (通膨過熱)': "💡 **投資建議**：加碼原物料、能源股、價值股與抗通膨債 (TIPS)；適度減碼長天期公債。",
-        'Stagflation (滯脹)': "💡 **投資建議**：提高現金比例、加碼黃金與防禦型板塊；大幅降低高風險股票部位。",
-        'Deflation/Recession (衰退)': "💡 **投資建議**：加碼長期美國公債 (TLT)、高品質公債與防禦型股票 (如必選消費、醫療)。"
+    kpis = {
+        'strat': {
+            'cagr': f"{strat_cagr*100:+.2f}%",
+            'vol': f"{strat_vol*100:.2f}%",
+            'mdd': f"{strat_mdd*100:.2f}%",
+            'sharpe': f"{strat_sharpe:.2f}"
+        },
+        'spy': {
+            'cagr': f"{spy_cagr*100:+.2f}%",
+            'vol': f"{spy_vol*100:.2f}%",
+            'mdd': f"{spy_mdd*100:.2f}%",
+            'sharpe': f"{spy_sharpe:.2f}"
+        }
     }
-    st.info(advice_map.get(latest_regime, "保持觀望"))
 
-# 3. 統計各個 Regime 的平均月報酬率
-st.subheader("📊 歷史數據實測：各 Regime 下 S&P 500 平均月報酬率")
-regime_stats = data.groupby('Regime')['SP500_Return'].agg(
-    平均月報酬率=lambda x: f"{x.mean()*100:.2f}%",
-    勝率=lambda x: f"{(x > 0).mean()*100:.1f}%",
-    樣本月份數='count'
-).reset_index()
+    return jsonify({'history': history, 'kpis': kpis})
 
-st.dataframe(regime_stats, use_container_width=True)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-# 4. 繪製累計資產曲線
-st.subheader("📈 S&P 500 歷史累計報酬與走勢")
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=data.index, y=(1 + data['SP500_Return'].fillna(0)).cumprod(), name='S&P 500 累積淨值'))
-fig.update_layout(template="plotly_dark", height=400, margin=dict(l=20, r=20, t=30, b=20))
-st.plotly_chart(fig, use_container_width=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
